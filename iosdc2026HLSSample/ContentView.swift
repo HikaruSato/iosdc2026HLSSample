@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var vm = SampleStreamViewModel()
+    @State private var vm = SampleStreamViewModel()
 
     var body: some View {
         NavigationStack {

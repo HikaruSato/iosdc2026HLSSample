@@ -1,9 +1,9 @@
 import AVFoundation
-import Combine
 import Foundation
+import Observation
 
 @MainActor
-final class SampleStreamViewModel: ObservableObject {
+@Observable final class SampleStreamViewModel {
     enum State: Equatable {
         case idle
         case requestingPermission
@@ -14,19 +14,19 @@ final class SampleStreamViewModel: ObservableObject {
     }
 
     private let streamer: LocalHLSStreamer
-    private var monitorTask: Task<Void, Never>?
+    @ObservationIgnored private var monitorTask: Task<Void, Never>?
 
-    @Published private(set) var state: State = .idle
-    @Published private(set) var streamId: String?
-    @Published private(set) var outputDirectoryURL: URL?
-    @Published private(set) var outputDirectoryText: String?
-    @Published private(set) var playbackURL: URL?
-    @Published private(set) var webPreviewURL: URL?
-    @Published private(set) var playlistText = ""
-    @Published private(set) var segmentCount = 0
-    @Published private(set) var elapsedSeconds = 0.0
-    @Published var isShowingPlayer = false
-    @Published var isShowingWebPreview = false
+    private(set) var state: State = .idle
+    private(set) var streamId: String?
+    private(set) var outputDirectoryURL: URL?
+    private(set) var outputDirectoryText: String?
+    private(set) var playbackURL: URL?
+    private(set) var webPreviewURL: URL?
+    private(set) var playlistText = ""
+    private(set) var segmentCount = 0
+    private(set) var elapsedSeconds = 0.0
+    var isShowingPlayer = false
+    var isShowingWebPreview = false
 
     var captureSession: AVCaptureSession {
         streamer.captureSession
