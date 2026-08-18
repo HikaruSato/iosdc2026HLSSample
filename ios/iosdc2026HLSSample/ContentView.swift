@@ -2,12 +2,14 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("hlsServerBaseURL") private var serverURLText = ""
     @State private var vm = SampleStreamViewModel()
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    serverSection
                     cameraSection
                     controlsSection
                     outputSection
@@ -27,21 +29,49 @@ struct ContentView: View {
                     }
                 }
             }
-            .sheet(isPresented: $vm.isShowingPlayer) {
-                if let playbackURL = vm.playbackURL {
-                    LocalHLSPlayerView(playlistURL: playbackURL)
-                }
+        }
+    }
+
+    private var serverSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Mac HTTP Server", systemImage: "server.rack")
+                    .font(.headline)
+
+                Spacer()
+
+                Label(vm.serverStateText, systemImage: vm.serverStateSystemImage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(serverStateColor)
             }
-            .sheet(isPresented: $vm.isShowingWebPreview) {
-                if let webPreviewURL = vm.webPreviewURL,
-                   let outputDirectoryURL = vm.outputDirectoryURL {
-                    LocalHLSWebPreview(
-                        htmlURL: webPreviewURL,
-                        allowingReadAccessTo: outputDirectoryURL
-                    )
+
+            TextField("http://192.168.x.x:8080", text: $serverURLText)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.URL)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+                .disabled(vm.isRecording)
+
+            Button {
+                Task {
+                    await vm.checkServer(serverURLText: serverURLText)
                 }
+            } label: {
+                Label("接続確認", systemImage: "network")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(serverURLText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vm.isRecording)
+
+            if let serverErrorMessage = vm.serverErrorMessage {
+                Text(serverErrorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
             }
         }
+        .padding(14)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var cameraSection: some View {
@@ -76,12 +106,12 @@ struct ContentView: View {
                         if vm.isRecording {
                             await vm.stopRecording()
                         } else {
-                            await vm.startRecording()
+                            await vm.startRecording(serverURLText: serverURLText)
                         }
                     }
                 } label: {
                     Label(
-                        vm.isRecording ? "停止" : "録画開始",
+                        vm.isRecording ? "停止" : "配信開始",
                         systemImage: vm.isRecording ? "stop.fill" : "record.circle"
                     )
                     .frame(maxWidth: .infinity)
@@ -89,28 +119,17 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .tint(vm.isRecording ? .red : .blue)
-                .disabled(!vm.canToggleRecording)
+                .disabled(!vm.canToggleRecording || serverURLText.isEmpty)
 
-                Button {
-                    vm.isShowingPlayer = true
-                } label: {
-                    Label("AVPlayer", systemImage: "play.rectangle")
-                        .frame(maxWidth: .infinity)
+                if let viewerURL = vm.viewerURL {
+                    ShareLink(item: viewerURL) {
+                        Label("Viewer", systemImage: "square.and.arrow.up")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .disabled(vm.playbackURL == nil || vm.isRecording)
             }
-
-            Button {
-                vm.isShowingWebPreview = true
-            } label: {
-                Label("WebView", systemImage: "safari")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .disabled(vm.webPreviewURL == nil || vm.isRecording)
 
             if let errorMessage = vm.errorMessage {
                 Text(errorMessage)
@@ -123,7 +142,7 @@ struct ContentView: View {
 
     private var outputSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("出力")
+            Text("配信")
                 .font(.headline)
 
             LabeledContent("経過秒数") {
@@ -136,6 +155,11 @@ struct ContentView: View {
                     .monospacedDigit()
             }
 
+            LabeledContent("pending upload") {
+                Text("\(vm.pendingUploadCount)")
+                    .monospacedDigit()
+            }
+
             if let streamId = vm.streamId {
                 LabeledContent("streamId") {
                     Text(streamId)
@@ -144,12 +168,12 @@ struct ContentView: View {
                 }
             }
 
-            if let outputDirectoryText = vm.outputDirectoryText {
-                Text(outputDirectoryText)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .lineLimit(nil)
+            if let viewerURL = vm.viewerURL {
+                urlText("Viewer", url: viewerURL)
+            }
+
+            if let playlistURL = vm.playlistURL {
+                urlText("playlist", url: playlistURL)
             }
         }
         .padding(14)
@@ -162,13 +186,37 @@ struct ContentView: View {
                 .font(.headline)
 
             ScrollView(.horizontal) {
-                Text(vm.playlistText.isEmpty ? "録画開始後にplaylistが表示されます" : vm.playlistText)
+                Text(vm.playlistText.isEmpty ? "最初のsegment upload後にplaylistが表示されます" : vm.playlistText)
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .background(Color(uiColor: .tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private var serverStateColor: Color {
+        switch vm.serverState {
+        case .unchecked:
+            return .secondary
+        case .checking:
+            return .orange
+        case .connected:
+            return .green
+        case .error:
+            return .red
+        }
+    }
+
+    private func urlText(_ label: String, url: URL) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(url.absoluteString)
+                .font(.caption.monospaced())
+                .textSelection(.enabled)
         }
     }
 }

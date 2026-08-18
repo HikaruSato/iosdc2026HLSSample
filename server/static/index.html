@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>iOSDC HLS Viewer</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <span class="eyebrow">LOCAL HLS ORIGIN</span>
+          <h1>iOSDC HLS Viewer</h1>
+        </div>
+        <div id="status" class="status waiting"><i></i><span>WAITING</span></div>
+      </header>
+
+      <section class="player-shell">
+        <video id="player" controls muted autoplay playsinline></video>
+        <div id="empty-state" class="empty-state">
+          <strong>Waiting for stream</strong>
+          <span>iPhoneから最初のplaylistが届くと再生を開始します</span>
+        </div>
+      </section>
+
+      <footer>
+        <div><span>STREAM</span><strong id="stream-id">-</strong></div>
+        <div><span>SEGMENTS</span><strong id="segment-count">0</strong></div>
+        <div><span>PLAYLIST</span><strong id="playlist-url">-</strong></div>
+      </footer>
+    </main>
+
+    <script src="/static/vendor/hls.min.js"></script>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

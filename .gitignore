@@ -60,3 +60,11 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# Local HLS server
+server/data/
+__pycache__/
+*.py[cod]
+
+# macOS
+.DS_Store

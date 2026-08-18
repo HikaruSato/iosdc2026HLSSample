@@ -1,12 +1,12 @@
 import Foundation
 
-struct LocalHLSManifest: Equatable, Sendable {
+struct HLSManifest: Equatable, Sendable {
     struct Segment: Equatable, Sendable {
         let seq: Int
         let durationSec: Double
 
         var uri: String {
-            "seg/\(LocalHLSManifest.paddedSequence(seq)).m4s"
+            "seg/\(HLSManifest.paddedSequence(seq)).m4s"
         }
     }
 

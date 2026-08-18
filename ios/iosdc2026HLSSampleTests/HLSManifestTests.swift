@@ -2,9 +2,9 @@ import Foundation
 import Testing
 @testable import iosdc2026HLSSample
 
-struct LocalHLSManifestTests {
+struct HLSManifestTests {
     @Test func initialPlaylistContainsRequiredTags() {
-        let manifest = LocalHLSManifest(targetDurationSec: 2)
+        let manifest = HLSManifest(targetDurationSec: 2)
 
         #expect(manifest.text.contains("#EXTM3U"))
         #expect(manifest.text.contains("#EXT-X-VERSION:7"))
@@ -15,7 +15,7 @@ struct LocalHLSManifestTests {
     }
 
     @Test func segmentUsesPaddedRelativePath() {
-        var manifest = LocalHLSManifest(targetDurationSec: 2)
+        var manifest = HLSManifest(targetDurationSec: 2)
 
         manifest.addSegment(seq: 1, durationSec: 2.0)
 
@@ -23,7 +23,7 @@ struct LocalHLSManifestTests {
     }
 
     @Test func duplicateSeqIsNotWrittenTwice() {
-        var manifest = LocalHLSManifest(targetDurationSec: 2)
+        var manifest = HLSManifest(targetDurationSec: 2)
 
         manifest.addSegment(seq: 1, durationSec: 2.0)
         manifest.addSegment(seq: 1, durationSec: 2.0)
@@ -33,7 +33,7 @@ struct LocalHLSManifestTests {
     }
 
     @Test func segmentsAreSortedBySequence() {
-        var manifest = LocalHLSManifest(targetDurationSec: 2)
+        var manifest = HLSManifest(targetDurationSec: 2)
 
         manifest.addSegment(seq: 2, durationSec: 2.0)
         manifest.addSegment(seq: 1, durationSec: 2.0)
@@ -52,7 +52,7 @@ struct LocalHLSManifestTests {
     }
 
     @Test func endlistIsWrittenOnceAtTheEnd() {
-        var manifest = LocalHLSManifest(targetDurationSec: 2)
+        var manifest = HLSManifest(targetDurationSec: 2)
 
         manifest.addSegment(seq: 1, durationSec: 2.0)
         manifest.finish()

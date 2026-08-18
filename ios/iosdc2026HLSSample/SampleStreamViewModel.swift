@@ -13,20 +13,26 @@ import Observation
         case error(String)
     }
 
-    private let streamer: LocalHLSStreamer
+    enum ServerState: Equatable {
+        case unchecked
+        case checking
+        case connected
+        case error(String)
+    }
+
+    private let streamer: SampleHLSStreamer
     @ObservationIgnored private var monitorTask: Task<Void, Never>?
 
     private(set) var state: State = .idle
+    private(set) var serverState: ServerState = .unchecked
     private(set) var streamId: String?
-    private(set) var outputDirectoryURL: URL?
-    private(set) var outputDirectoryText: String?
-    private(set) var playbackURL: URL?
-    private(set) var webPreviewURL: URL?
+    private(set) var viewerURL: URL?
+    private(set) var playlistURL: URL?
     private(set) var playlistText = ""
     private(set) var segmentCount = 0
+    private(set) var pendingUploadCount = 0
     private(set) var elapsedSeconds = 0.0
-    var isShowingPlayer = false
-    var isShowingWebPreview = false
+    private(set) var operationErrorMessage: String?
 
     var captureSession: AVCaptureSession {
         streamer.captureSession
@@ -34,6 +40,13 @@ import Observation
 
     var errorMessage: String? {
         if case let .error(message) = state {
+            return message
+        }
+        return operationErrorMessage
+    }
+
+    var serverErrorMessage: String? {
+        if case let .error(message) = serverState {
             return message
         }
         return nil
@@ -86,11 +99,37 @@ import Observation
         }
     }
 
+    var serverStateText: String {
+        switch serverState {
+        case .unchecked:
+            return "未確認"
+        case .checking:
+            return "確認中"
+        case .connected:
+            return "接続済み"
+        case .error:
+            return "接続エラー"
+        }
+    }
+
+    var serverStateSystemImage: String {
+        switch serverState {
+        case .unchecked:
+            return "network"
+        case .checking:
+            return "arrow.triangle.2.circlepath"
+        case .connected:
+            return "checkmark.circle.fill"
+        case .error:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+
     var elapsedText: String {
         String(format: "%.1f", elapsedSeconds)
     }
 
-    init(streamer: LocalHLSStreamer = LocalHLSStreamer()) {
+    init(streamer: SampleHLSStreamer = SampleHLSStreamer()) {
         self.streamer = streamer
     }
 
@@ -99,17 +138,41 @@ import Observation
         await prepare()
     }
 
-    func startRecording() async {
-        guard state == .ready || state == .finished else { return }
+    func checkServer(serverURLText: String) async {
+        operationErrorMessage = nil
+        serverState = .checking
+        elapsedSeconds = 0
+        segmentCount = 0
+        pendingUploadCount = 0
+        playlistText = ""
 
         do {
+            let serverURL = try makeServerURL(from: serverURLText)
+            try await streamer.checkServer(baseURL: serverURL)
+            serverState = .connected
+        } catch {
+            serverState = .error(error.localizedDescription)
+        }
+    }
+
+    func startRecording(serverURLText: String) async {
+        guard state == .ready || state == .finished else { return }
+
+        operationErrorMessage = nil
+        serverState = .checking
+
+        do {
+            let serverURL = try makeServerURL(from: serverURLText)
             try await streamer.startPreview()
-            let snapshot = try await streamer.startRecording()
+            let snapshot = try await streamer.startRecording(serverBaseURL: serverURL)
             apply(snapshot)
+            serverState = .connected
             state = .recording
             startMonitoring()
         } catch {
-            state = .error("録画開始に失敗しました: \(error.localizedDescription)")
+            serverState = .error(error.localizedDescription)
+            operationErrorMessage = "録画開始に失敗しました: \(error.localizedDescription)"
+            state = .ready
         }
     }
 
@@ -123,8 +186,13 @@ import Observation
             let snapshot = try await streamer.stopRecording()
             apply(snapshot)
             state = .finished
+
+            if let uploadError = snapshot.errorMessage {
+                operationErrorMessage = "アップロードに失敗しました: \(uploadError)"
+            }
         } catch {
-            state = .error("録画停止に失敗しました: \(error.localizedDescription)")
+            operationErrorMessage = "録画停止に失敗しました: \(error.localizedDescription)"
+            state = .finished
         }
     }
 
@@ -159,8 +227,11 @@ import Observation
             while !Task.isCancelled {
                 elapsedSeconds = streamer.recordedSeconds
 
-                if let snapshot = try? await streamer.currentSnapshot() {
+                if let snapshot = await streamer.currentSnapshot() {
                     apply(snapshot)
+                    if let uploadError = snapshot.errorMessage {
+                        operationErrorMessage = "アップロードに失敗しました: \(uploadError)"
+                    }
                 }
 
                 try? await Task.sleep(for: .milliseconds(300))
@@ -168,14 +239,21 @@ import Observation
         }
     }
 
-    private func apply(_ snapshot: LocalHLSStreamSnapshot) {
-        streamId = snapshot.stream.streamId
-        outputDirectoryURL = snapshot.stream.directoryURL
-        outputDirectoryText = snapshot.stream.directoryURL.path
-        playbackURL = snapshot.stream.playlistURL
-        webPreviewURL = snapshot.stream.webPreviewURL
+    private func apply(_ snapshot: HLSUploadSnapshot) {
+        streamId = snapshot.streamId
+        viewerURL = snapshot.viewerURL
+        playlistURL = snapshot.playlistURL
         playlistText = snapshot.playlistText
         segmentCount = snapshot.segmentCount
+        pendingUploadCount = snapshot.pendingUploadCount
+    }
+
+    private func makeServerURL(from text: String) throws -> URL {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmedText), !trimmedText.isEmpty else {
+            throw HTTPHLSClientError.invalidServerURL
+        }
+        return url
     }
 
     private func requestCameraPermission() async -> Bool {

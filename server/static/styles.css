@@ -1,0 +1,178 @@
+:root {
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+  background: #0d141a;
+  color: #f7f8f9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #0d141a;
+}
+
+main {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 100%;
+}
+
+header,
+footer {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  padding: 20px 28px;
+}
+
+header {
+  border-bottom: 1px solid #33404a;
+}
+
+.eyebrow,
+footer span {
+  color: #8f9aa3;
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+h1 {
+  font-size: 22px;
+  letter-spacing: 0;
+  margin: 4px 0 0;
+}
+
+.status {
+  align-items: center;
+  display: flex;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 8px;
+}
+
+.status i {
+  background: #89939b;
+  border-radius: 50%;
+  height: 9px;
+  width: 9px;
+}
+
+.status.live {
+  color: #ff5555;
+}
+
+.status.live i {
+  background: #ff5555;
+  box-shadow: 0 0 0 5px rgb(255 85 85 / 16%);
+}
+
+.status.ended {
+  color: #65c6a6;
+}
+
+.status.ended i {
+  background: #65c6a6;
+}
+
+.status.error {
+  color: #f0ba55;
+}
+
+.status.error i {
+  background: #f0ba55;
+}
+
+.player-shell {
+  align-items: center;
+  background: #05080a;
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+  position: relative;
+}
+
+video {
+  height: 100%;
+  max-height: calc(100vh - 184px);
+  object-fit: contain;
+  width: 100%;
+}
+
+.empty-state {
+  align-items: center;
+  color: #8f9aa3;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: absolute;
+  text-align: center;
+}
+
+.empty-state strong {
+  color: #f7f8f9;
+  font-size: 22px;
+}
+
+.empty-state span {
+  font-size: 13px;
+}
+
+.empty-state.hidden {
+  display: none;
+}
+
+footer {
+  border-top: 1px solid #33404a;
+  gap: 28px;
+}
+
+footer div {
+  min-width: 0;
+}
+
+footer div:last-child {
+  flex: 1;
+}
+
+footer strong {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  margin-top: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 680px) {
+  header,
+  footer {
+    padding: 16px;
+  }
+
+  footer {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  footer div,
+  footer div:last-child {
+    width: 100%;
+  }
+
+  video {
+    max-height: calc(100vh - 300px);
+  }
+}
