@@ -4,6 +4,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("hlsServerBaseURL") private var serverURLText = ""
     @State private var vm = SampleStreamViewModel()
+    @FocusState private var isServerURLFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -18,7 +19,16 @@ struct ContentView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 18)
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("iOSDC HLS Sample")
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("完了") {
+                        isServerURLFocused = false
+                    }
+                }
+            }
             .task {
                 await vm.onAppear()
             }
@@ -50,9 +60,15 @@ struct ContentView: View {
                 .keyboardType(.URL)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
+                .focused($isServerURLFocused)
+                .submitLabel(.done)
+                .onSubmit {
+                    isServerURLFocused = false
+                }
                 .disabled(vm.isRecording)
 
             Button {
+                isServerURLFocused = false
                 Task {
                     await vm.checkServer(serverURLText: serverURLText)
                 }
@@ -102,6 +118,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 Button {
+                    isServerURLFocused = false
                     Task {
                         if vm.isRecording {
                             await vm.stopRecording()

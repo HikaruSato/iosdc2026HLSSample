@@ -54,6 +54,8 @@ server/data/streams/{streamId}/
 
 Python 3.10以上を使います。追加パッケージのインストールは不要です。
 
+### 同じネットワークで確認する
+
 1. MacでHTTPサーバーを起動します。
 
    ```sh
@@ -67,6 +69,54 @@ Python 3.10以上を使います。追加パッケージのインストールは
 6. カメラとマイクの権限を許可し、`配信開始`を押します。
 
 macOSのファイアウォール確認が表示された場合は、Pythonからの受信接続を許可してください。iOS SimulatorからMac上のサーバーへ接続する場合は`http://localhost:8080`を使用できます。
+
+### 会場でngrok経由のアップロードを確認する
+
+会場のネットワークでiPhoneからMacへ直接接続できない場合は、ngrokをiPhoneからMacへのアップロード経路として使用できます。視聴URLとしてngrok URLを配布せず、Macのブラウザで開いたviewerをスクリーンへ投影します。
+
+```text
+iPhone
+  └── HTTPS ──> ngrok ──> http://localhost:8080  PUT
+
+Mac browser
+  └─────────────────────> http://localhost:8080  GET
+```
+
+ngrokを初めて使うMacでは、[ngrok公式のmacOS向け手順](https://ngrok.com/download/mac-os)に従ってインストールし、アカウントのauthtokenを設定します。authtokenはリポジトリへ保存しないでください。
+
+```sh
+brew install ngrok
+ngrok config add-authtoken "<YOUR_AUTHTOKEN>"
+```
+
+会場では次の順番で起動します。
+
+1. MacでHTTPサーバーを起動します。
+
+   ```sh
+   python3 server/server.py
+   ```
+
+2. 別のターミナルで、Macの8080番ポートをngrokへ公開します。
+
+   ```sh
+   ngrok http 8080
+   ```
+
+3. ngrokが表示したHTTPS URLを確認します。
+
+   ```text
+   Forwarding  https://example.ngrok.app -> http://localhost:8080
+   ```
+
+4. iPhoneアプリの`Mac HTTP Server`へ`https://example.ngrok.app`を入力し、`接続確認`を押します。
+5. Macのブラウザで`http://localhost:8080`を開きます。ngrokのURLは開きません。
+6. iPhoneアプリで`配信開始`を押し、Macのviewerで再生されることを確認します。
+7. デモ終了後、`ngrok http 8080`を実行しているターミナルでControl-Cを押し、公開を終了します。
+
+この方法では、iPhoneとMacが同じLANに接続されている必要はありません。双方からインターネットへ接続できれば利用できます。iPhoneからのHLSアップロードとMacからngrokへの接続が同じインターネット回線へ集中しないよう、可能であればMacは有線LAN、iPhoneは別回線で確認します。
+
+ngrok URLを知っている利用者は、このサンプルのGET・PUT APIへアクセスできます。URLを視聴者へ共有せず、デモ直前に起動して終了後すぐに停止してください。URLを秘密にすること自体は認証の代わりにはならないため、長時間の公開や本番利用には使用しません。
 
 ポートや保存先は起動オプションで変更できます。
 
@@ -117,6 +167,6 @@ python3 -m unittest discover -s server/tests -v
 
 ## 注意
 
-Mac HTTPサーバーは同一ネットワーク内でのデモ専用です。認証、TLS、アクセス制御、保存容量の管理は実装していないため、インターネットへ公開しないでください。
+Mac HTTPサーバーはデモ専用です。認証、TLS、アクセス制御、保存容量の管理は実装していません。通常は同一ネットワーク内だけで使用し、ngrokを使う場合も上記の会場デモ中だけ一時的に公開してください。
 
 ブラウザ再生には同梱したhls.js v1.6.16を使用します。ライセンスは`server/static/vendor/LICENSE.hls.js.txt`を参照してください。
