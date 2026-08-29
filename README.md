@@ -65,6 +65,12 @@ server/data/streams/{streamId}/
     └── ...
 ```
 
+保存済みのstreamは、そのstreamのディレクトリへ移動し、playlistを入口にして再生確認できます。`.m4s`を単体で開くのではなく、HLS一式を参照する`playlist.m3u8`を`ffplay`へ渡します。
+
+```sh
+ffplay playlist.m3u8
+```
+
 ## 実行
 
 Python 3.10以上を使います。追加パッケージのインストールは不要です。

@@ -3,23 +3,8 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 70;
 	objects = {
-
-/* Begin PBXBuildFile section */
-		A00000000000000000000030 /* iosdc2026HLSSampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000020 /* iosdc2026HLSSampleApp.swift */; };
-		A00000000000000000000031 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000021 /* ContentView.swift */; };
-		A00000000000000000000032 /* SampleStreamViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000022 /* SampleStreamViewModel.swift */; };
-		A00000000000000000000033 /* SampleHLSStreamer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000023 /* SampleHLSStreamer.swift */; };
-		A00000000000000000000034 /* HTTPHLSClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000024 /* HTTPHLSClient.swift */; };
-		A00000000000000000000035 /* HLSManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000025 /* HLSManifest.swift */; };
-		A00000000000000000000036 /* HLSSegmentRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000026 /* HLSSegmentRecorder.swift */; };
-		A00000000000000000000037 /* CameraPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000027 /* CameraPreviewView.swift */; };
-		A00000000000000000000038 /* HLSStreamPublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000028 /* HLSStreamPublisher.swift */; };
-		A0000000000000000000003A /* HLSManifestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002A /* HLSManifestTests.swift */; };
-		A0000000000000000000003B /* HTTPHLSClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002B /* HTTPHLSClientTests.swift */; };
-		A0000000000000000000003C /* HLSStreamPublisherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002C /* HLSStreamPublisherTests.swift */; };
-/* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		A0000000000000000000001A /* PBXContainerItemProxy */ = {
@@ -34,20 +19,22 @@
 /* Begin PBXFileReference section */
 		A00000000000000000000008 /* iosdc2026HLSSample.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iosdc2026HLSSample.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00000000000000000000009 /* iosdc2026HLSSampleTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = iosdc2026HLSSampleTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		A00000000000000000000020 /* iosdc2026HLSSampleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iosdc2026HLSSampleApp.swift; sourceTree = "<group>"; };
-		A00000000000000000000021 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		A00000000000000000000022 /* SampleStreamViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleStreamViewModel.swift; sourceTree = "<group>"; };
-		A00000000000000000000023 /* SampleHLSStreamer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleHLSStreamer.swift; sourceTree = "<group>"; };
-		A00000000000000000000024 /* HTTPHLSClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPHLSClient.swift; sourceTree = "<group>"; };
-		A00000000000000000000025 /* HLSManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HLSManifest.swift; sourceTree = "<group>"; };
-		A00000000000000000000026 /* HLSSegmentRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HLSSegmentRecorder.swift; sourceTree = "<group>"; };
-		A00000000000000000000027 /* CameraPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPreviewView.swift; sourceTree = "<group>"; };
-		A00000000000000000000028 /* HLSStreamPublisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HLSStreamPublisher.swift; sourceTree = "<group>"; };
-		A00000000000000000000029 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A0000000000000000000002A /* HLSManifestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HLSManifestTests.swift; sourceTree = "<group>"; };
-		A0000000000000000000002B /* HTTPHLSClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPHLSClientTests.swift; sourceTree = "<group>"; };
-		A0000000000000000000002C /* HLSStreamPublisherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HLSStreamPublisherTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		41B59C23304307AE00B8A2A0 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A00000000000000000000006 /* iosdc2026HLSSample */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		41B59C18304307AD00B8A2A0 /* iosdc2026HLSSample */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (41B59C23304307AE00B8A2A0 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = iosdc2026HLSSample; sourceTree = "<group>"; };
+		41B59C27304307B200B8A2A0 /* iosdc2026HLSSampleTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = iosdc2026HLSSampleTests; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		A0000000000000000000000B /* Frameworks */ = {
@@ -70,8 +57,8 @@
 		A00000000000000000000002 = {
 			isa = PBXGroup;
 			children = (
-				A00000000000000000000004 /* iosdc2026HLSSample */,
-				A00000000000000000000005 /* iosdc2026HLSSampleTests */,
+				41B59C18304307AD00B8A2A0 /* iosdc2026HLSSample */,
+				41B59C27304307B200B8A2A0 /* iosdc2026HLSSampleTests */,
 				A00000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -83,33 +70,6 @@
 				A00000000000000000000009 /* iosdc2026HLSSampleTests.xctest */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		A00000000000000000000004 /* iosdc2026HLSSample */ = {
-			isa = PBXGroup;
-			children = (
-				A00000000000000000000020 /* iosdc2026HLSSampleApp.swift */,
-				A00000000000000000000021 /* ContentView.swift */,
-				A00000000000000000000022 /* SampleStreamViewModel.swift */,
-				A00000000000000000000023 /* SampleHLSStreamer.swift */,
-				A00000000000000000000024 /* HTTPHLSClient.swift */,
-				A00000000000000000000025 /* HLSManifest.swift */,
-				A00000000000000000000026 /* HLSSegmentRecorder.swift */,
-				A00000000000000000000027 /* CameraPreviewView.swift */,
-				A00000000000000000000028 /* HLSStreamPublisher.swift */,
-				A00000000000000000000029 /* Info.plist */,
-			);
-			path = iosdc2026HLSSample;
-			sourceTree = "<group>";
-		};
-		A00000000000000000000005 /* iosdc2026HLSSampleTests */ = {
-			isa = PBXGroup;
-			children = (
-				A0000000000000000000002A /* HLSManifestTests.swift */,
-				A0000000000000000000002B /* HTTPHLSClientTests.swift */,
-				A0000000000000000000002C /* HLSStreamPublisherTests.swift */,
-			);
-			path = iosdc2026HLSSampleTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -126,6 +86,9 @@
 			buildRules = (
 			);
 			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				41B59C18304307AD00B8A2A0 /* iosdc2026HLSSample */,
 			);
 			name = iosdc2026HLSSample;
 			productName = iosdc2026HLSSample;
@@ -144,6 +107,9 @@
 			);
 			dependencies = (
 				A00000000000000000000019 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				41B59C27304307B200B8A2A0 /* iosdc2026HLSSampleTests */,
 			);
 			name = iosdc2026HLSSampleTests;
 			productName = iosdc2026HLSSampleTests;
@@ -211,15 +177,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A00000000000000000000030 /* iosdc2026HLSSampleApp.swift in Sources */,
-				A00000000000000000000031 /* ContentView.swift in Sources */,
-				A00000000000000000000032 /* SampleStreamViewModel.swift in Sources */,
-				A00000000000000000000033 /* SampleHLSStreamer.swift in Sources */,
-				A00000000000000000000034 /* HTTPHLSClient.swift in Sources */,
-				A00000000000000000000035 /* HLSManifest.swift in Sources */,
-				A00000000000000000000036 /* HLSSegmentRecorder.swift in Sources */,
-				A00000000000000000000037 /* CameraPreviewView.swift in Sources */,
-				A00000000000000000000038 /* HLSStreamPublisher.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -227,9 +184,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A0000000000000000000003A /* HLSManifestTests.swift in Sources */,
-				A0000000000000000000003B /* HTTPHLSClientTests.swift in Sources */,
-				A0000000000000000000003C /* HLSStreamPublisherTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
