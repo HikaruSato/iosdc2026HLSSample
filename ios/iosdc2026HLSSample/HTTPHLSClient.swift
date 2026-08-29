@@ -1,5 +1,8 @@
 import Foundation
 
+/// HLSファイルの保存先を抽象化するプロトコル。
+///
+/// PublisherはHTTPの詳細を知らずに公開順だけを担当でき、テストではインメモリ実装へ差し替えられる。
 protocol HLSClient: Sendable {
     var viewerURL: URL { get }
 
@@ -10,6 +13,7 @@ protocol HLSClient: Sendable {
     func putPlaylist(streamId: String, text: String) async throws
 }
 
+/// サーバーURLまたはHTTPレスポンスが期待する形式でない場合のエラー。
 enum HTTPHLSClientError: LocalizedError {
     case invalidServerURL
     case invalidResponse
@@ -27,11 +31,15 @@ enum HTTPHLSClientError: LocalizedError {
     }
 }
 
+/// `init.mp4`、`.m4s`、`playlist.m3u8` をHTTP PUTで保存するClient。
+///
+/// サーバーは映像変換を行わない。iPhoneが完成させたHLSファイルを、そのまま静的配信できるパスへ置く。
 struct HTTPHLSClient: HLSClient {
     let viewerURL: URL
 
     private let session: URLSession
 
+    /// `/streams/...` を追加できるよう、baseURLをschemeとhostだけの形へ正規化する。
     init(baseURL: URL, session: URLSession = .shared) throws {
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
               let scheme = components.scheme?.lowercased(),
@@ -53,6 +61,7 @@ struct HTTPHLSClient: HLSClient {
         self.session = session
     }
 
+    /// 配信開始前にサーバーへの到達性を短いtimeoutで確認する。
     func healthCheck() async throws {
         var request = URLRequest(url: endpoint("health"))
         request.timeoutInterval = 5
@@ -64,6 +73,7 @@ struct HTTPHLSClient: HLSClient {
         streamEndpoint(streamId: streamId).appendingPathComponent("playlist.m3u8")
     }
 
+    /// `EXT-X-MAP` が参照する初期化segmentを保存する。
     func putInitSegment(streamId: String, data: Data) async throws {
         try await put(
             data,
@@ -72,6 +82,7 @@ struct HTTPHLSClient: HLSClient {
         )
     }
 
+    /// sequenceと同じ6桁ファイル名でmedia segmentを保存する。
     func putMediaSegment(streamId: String, seq: Int, data: Data) async throws {
         let url = streamEndpoint(streamId: streamId)
             .appendingPathComponent("seg", isDirectory: true)
@@ -79,6 +90,7 @@ struct HTTPHLSClient: HLSClient {
         try await put(data, to: url, contentType: "video/mp4")
     }
 
+    /// ViewerがpollingするplaylistをMPEG URLのContent-Typeで保存する。
     func putPlaylist(streamId: String, text: String) async throws {
         try await put(
             Data(text.utf8),
@@ -87,6 +99,7 @@ struct HTTPHLSClient: HLSClient {
         )
     }
 
+    /// 全PUTに共通するHTTPリクエスト生成と2xx検証。
     private func put(_ data: Data, to url: URL, contentType: String) async throws {
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"

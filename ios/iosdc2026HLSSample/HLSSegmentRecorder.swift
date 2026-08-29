@@ -1,24 +1,39 @@
 @preconcurrency import AVFoundation
 import Foundation
 
-// CaptureSession state and Writer state are confined to their dedicated serial queues.
+/// カメラとマイクのsample bufferを、HLS用のfMP4 fragmentへ変換するRecorder。
+///
+/// データは次の順に流れる。
+///
+/// `AVCaptureSession → CMSampleBuffer → AVAssetWriter → HLSFragment`
+///
+/// CaptureSessionの状態は`sessionQueue`、Writerと時刻の状態は`writingQueue`へ閉じ込める。
+/// このqueue confinementを契約として、delegateから参照される自身を`@unchecked Sendable`にしている。
 final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
+    /// サンプルで説明する映像・音声品質とsegment間隔。
     struct Config: Sendable {
+        /// 縦向き720p。Capture時の向きはconnection側で90度回転する。
         var videoSize = CGSize(width: 720, height: 1280)
+        /// サンプルでは挙動を追いやすい固定bitrateを使う。
         var videoBitrate = 1_500_000
         var audioBitrate = 64_000
+        /// Writerへ依頼するfragment間隔。実際の境界はkeyframeにより前後する。
         var segmentSeconds = 2.0
     }
 
     private let config: Config
     private let session = AVCaptureSession()
+
+    // CaptureSessionの構成・start・stopは、このserial queueだけで行う。
     private let sessionQueue = DispatchQueue(label: "sample.capture.session.queue")
+    // sampleの順序、Writerの状態、fragmentの連番は、このserial queueだけで更新する。
     private let writingQueue = DispatchQueue(label: "sample.hls.writer.queue")
 
+    // MovieFileOutputではなくDataOutputを使い、完成ファイルになる前のsampleを受け取る。
     private let videoOutput = AVCaptureVideoDataOutput()
     private let audioOutput = AVCaptureAudioDataOutput()
 
-    // writingQueue only
+    // 以下のmutable stateはwritingQueueからだけ読み書きする。
     private var writer: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
     private var audioInput: AVAssetWriterInput?
@@ -29,8 +44,11 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
     private var lastAdjustedPTS: CMTime = .invalid
     private var segmentIndex = 0
 
+    // AACのprimingを含むsampleにも余白を持たせるため、Writerのtimelineを10秒から始める。
+    // VideoとAudioへ同じoffsetを加えることで、両者の相対的な時刻差は変えない。
     private let startTimeOffset = CMTime(value: 10, timescale: 1)
 
+    /// SwiftUIのプレビュー表示に使うCaptureSession。
     var captureSession: AVCaptureSession {
         session
     }
@@ -40,6 +58,10 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
         super.init()
     }
 
+    // MARK: - Capture lifecycle
+
+    /// カメラとマイクを構成し、sample bufferの受信を開始する。
+    /// HLS Writerは``startRecording()``を呼ぶまで作らない。
     func start() async throws {
         try await withCheckedThrowingContinuation { continuation in
             sessionQueue.async {
@@ -60,6 +82,8 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
         }
     }
 
+    /// Writerを準備し、生成されるfragmentを順番に受け取るstreamを返す。
+    /// streamを先に作ってから`isWriting`を有効にするため、最初のinit fragmentを取りこぼさない。
     func startRecording() async throws -> AsyncThrowingStream<HLSFragment, Error> {
         let fragments = AsyncThrowingStream<HLSFragment, Error>.makeStream()
 
@@ -84,7 +108,9 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
         return fragments.stream
     }
 
+    /// Captureを止めてsample callbackをdrainした後、Writerとfragment streamを閉じる。
     func stop() async {
+        // 新しいsampleがwritingQueueへ追加されなくなるまで、先にCaptureSessionの停止を待つ。
         await withCheckedContinuation { continuation in
             sessionQueue.async {
                 if self.session.isRunning {
@@ -94,6 +120,8 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
             }
         }
 
+        // sessionQueueより前に投入済みのsampleはserialなwritingQueue上で処理済みになる。
+        // その後finishWritingし、最後のfragment callbackを受け取ってからstreamを終了する。
         await withCheckedContinuation { continuation in
             writingQueue.async {
                 self.isWriting = false
@@ -106,6 +134,8 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
         }
     }
 
+    // MARK: - CaptureSession setup
+
     private func configureAudioSession() throws {
         let audioSession = AVAudioSession.sharedInstance()
         try audioSession.setCategory(.playAndRecord, mode: .videoRecording, options: [.defaultToSpeaker])
@@ -113,6 +143,7 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
     }
 
     private func setupCaptureSessionLocked() throws {
+        // Previewの再開時に同じinput/outputを二重追加しないよう、構成は初回だけ行う。
         if !session.inputs.isEmpty || !session.outputs.isEmpty { return }
 
         session.beginConfiguration()
@@ -139,7 +170,9 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
         videoOutput.videoSettings = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
         ]
+        // リアルタイム配信では遅れたframeを溜めず、現在の映像へ追いつくことを優先する。
         videoOutput.alwaysDiscardsLateVideoFrames = true
+        // VideoとAudioを同じserial queueへ渡し、Writerへappendする順序を1か所で管理する。
         videoOutput.setSampleBufferDelegate(self, queue: writingQueue)
         if session.canAddOutput(videoOutput) {
             session.addOutput(videoOutput)
@@ -156,11 +189,16 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
         }
     }
 
+    // MARK: - Writer setup
+
     private func setupWriterLocked() throws {
         cleanupWriterLocked()
 
+        // output URLを持たないWriterにdelegateを設定し、完成したfMP4 fragmentをDataで受け取る。
         let writer = AVAssetWriter(contentType: .mpeg4Movie)
+        // Apple HLS向けのfragmented MP4構成を選ぶ。
         writer.outputFileTypeProfile = .mpeg4AppleHLS
+        // 2秒は希望値。実際のsegment境界は次のkeyframeまで前後することがある。
         writer.preferredOutputSegmentInterval = CMTime(
             seconds: config.segmentSeconds,
             preferredTimescale: 600
@@ -169,6 +207,7 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
         writer.delegate = self
 
         let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings())
+        // ファイル変換ではなく撮影中の入力なので、リアルタイムsourceであることをWriterへ伝える。
         videoInput.expectsMediaDataInRealTime = true
 
         let audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings())
@@ -198,7 +237,9 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
             AVVideoCompressionPropertiesKey: [
                 AVVideoAverageBitRateKey: config.videoBitrate,
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+                // segment先頭付近にIDRを用意できるよう、segment間隔に合わせてkeyframeを要求する。
                 AVVideoMaxKeyFrameIntervalDurationKey: config.segmentSeconds,
+                // frameの表示順とdecode順を一致させ、segment単位の再生を単純にする。
                 AVVideoAllowFrameReorderingKey: false
             ]
         ]
@@ -213,6 +254,8 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
         ]
     }
 
+    // MARK: - Writer completion
+
     private func finishWriterLocked(completion: @escaping @Sendable (Error?) -> Void) {
         guard let writer else {
             completion(nil)
@@ -221,12 +264,14 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
 
         switch writer.status {
         case .writing:
+            // 開始時と同じ補正後timelineでmedia rangeを閉じる。
             if lastAdjustedPTS.isValid {
                 writer.endSession(atSourceTime: lastAdjustedPTS)
             }
 
             videoInput?.markAsFinished()
             audioInput?.markAsFinished()
+            // finishWritingにより、残っている最後のsegmentがdelegateへ届く可能性がある。
             writer.finishWriting { [self] in
                 writingQueue.async { [self] in
                     let error = self.writer?.status == .completed
@@ -265,6 +310,7 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
             writer?.cancelWriting()
         }
         isWriting = false
+        // printだけで終わらせず、consumerまで同じエラーを届ける。
         finishFragmentStreamLocked(throwing: error)
         cleanupWriterLocked()
     }
@@ -288,12 +334,15 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
     }
 }
 
+// MARK: - Camera and microphone samples
+
 extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
     func captureOutput(
         _ output: AVCaptureOutput,
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
+        // 録画中かつ利用可能なsampleだけをWriterへ流し、状態遷移を単純に保つ。
         guard isWriting, CMSampleBufferDataIsReady(sampleBuffer) else { return }
 
         startWriterIfNeeded(output: output, sampleBuffer: sampleBuffer)
@@ -301,6 +350,7 @@ extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCa
     }
 
     private func startWriterIfNeeded(output: AVCaptureOutput, sampleBuffer: CMSampleBuffer) {
+        // 最初のVideo PTSを共通の基準にする。Audioが先に届いても開始はしない。
         guard output === videoOutput else { return }
         guard !didStartSession, let writer else { return }
 
@@ -312,6 +362,7 @@ extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCa
         didStartSession = true
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         writer.startSession(atSourceTime: startTimeOffset)
+        // Capture clock上のPTSを、10秒から始まるWriter timelineへ平行移動する。
         timeOffsetDelta = startTimeOffset - pts
     }
 
@@ -323,6 +374,7 @@ extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCa
 
         let adjustedSampleBuffer: CMSampleBuffer
         do {
+            // 映像・音声の全sampleへ同じdeltaを適用し、A/V syncを保つ。
             adjustedSampleBuffer = try sampleBuffer.offsettingTiming(by: timeOffsetDelta)
         } catch {
             failWriterLocked(action: "adjust sample timing")
@@ -336,6 +388,7 @@ extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCa
 
         let didAppend: Bool
         if output === videoOutput {
+            // Writerが詰まったときは待機queueを作らず、そのsampleを落として遅延をboundedにする。
             guard videoInput.isReadyForMoreMediaData else { return }
             didAppend = videoInput.append(adjustedSampleBuffer)
         } else {
@@ -349,6 +402,8 @@ extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCa
     }
 }
 
+// MARK: - HLS fragment output
+
 extension HLSSegmentRecorder: AVAssetWriterDelegate {
     func assetWriter(
         _ writer: AVAssetWriter,
@@ -356,6 +411,7 @@ extension HLSSegmentRecorder: AVAssetWriterDelegate {
         segmentType: AVAssetSegmentType,
         segmentReport: AVAssetSegmentReport?
     ) {
+        // delegateが呼ばれるqueueに依存せず、連番とContinuationの操作をwritingQueueへ戻す。
         let duration = segmentDuration(from: segmentReport)
 
         writingQueue.async {
@@ -363,9 +419,11 @@ extension HLSSegmentRecorder: AVAssetWriterDelegate {
 
             switch segmentType {
             case .initialization:
+                // EXT-X-MAPから参照されるinit.mp4。配信ごとに最初の1回だけ生成される。
                 continuation.yield(.initialization(segmentData))
 
             case .separable:
+                // 単独で分離可能なmedia segmentへ、playlistと同じsequenceを付ける。
                 self.segmentIndex += 1
                 continuation.yield(.media(
                     sequence: self.segmentIndex,
@@ -380,6 +438,7 @@ extension HLSSegmentRecorder: AVAssetWriterDelegate {
     }
 
     private func segmentDuration(from report: AVAssetSegmentReport?) -> Double {
+        // EXTINFには希望値ではなく、Writerが報告したVideo trackの実時間を使う。
         guard let track = report?.trackReports.first(where: { $0.mediaType == .video }) else {
             return config.segmentSeconds
         }
@@ -389,6 +448,7 @@ extension HLSSegmentRecorder: AVAssetWriterDelegate {
     }
 }
 
+/// CaptureSessionまたはWriterの準備・実行に失敗した理由。
 enum HLSSegmentRecorderError: LocalizedError {
     case recordingAlreadyActive
     case cameraUnavailable
@@ -411,7 +471,10 @@ enum HLSSegmentRecorderError: LocalizedError {
     }
 }
 
+// MARK: - Sample timing correction
+
 private extension CMSampleBuffer {
+    /// sampleの内容は変えず、PTSと有効なDTSを同じ量だけ平行移動したコピーを作る。
     func offsettingTiming(by offset: CMTime) throws -> CMSampleBuffer {
         let timingInfos: [CMSampleTimingInfo]
         do {
@@ -428,6 +491,7 @@ private extension CMSampleBuffer {
         }
 
         let copied = try CMSampleBuffer(copying: self, withNewTiming: timingInfos)
+        // output PTSも同じtimelineへ合わせ、Writerが参照する時刻情報を一貫させる。
         try copied.setOutputPresentationTimeStamp(copied.outputPresentationTimeStamp + offset)
         return copied
     }
