@@ -24,9 +24,11 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
     private let config: Config
     private let session = AVCaptureSession()
 
-    // CaptureSessionの構成・start・stopは、このserial queueだけで行う。
+    // startRunning()は呼び出し元をblockするため、Appleはserial queueでの実行を推奨している。
+    // CaptureSessionの構成・start・stopは、このqueueだけで行う。
     private let sessionQueue = DispatchQueue(label: "sample.capture.session.queue")
-    // sampleの順序、Writerの状態、fragmentの連番は、このserial queueだけで更新する。
+    // Video/Audio DataOutputのsetSampleBufferDelegate(_:queue:)へ渡す必要があるため、
+    // callback先はserialなDispatchQueueとして持つ。Writerの状態とfragmentの連番もここで更新する。
     private let writingQueue = DispatchQueue(label: "sample.hls.writer.queue")
 
     // MovieFileOutputではなくDataOutputを使い、完成ファイルになる前のsampleを受け取る。
@@ -172,7 +174,8 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
         ]
         // リアルタイム配信では遅れたframeを溜めず、現在の映像へ追いつくことを優先する。
         videoOutput.alwaysDiscardsLateVideoFrames = true
-        // VideoとAudioを同じserial queueへ渡し、Writerへappendする順序を1か所で管理する。
+        // AppleのAPI要件に従い、VideoとAudioのdelegateにはserial queueを指定する。
+        // 両方を同じwritingQueueへ渡し、Writerへappendする順序も1か所で管理する。
         videoOutput.setSampleBufferDelegate(self, queue: writingQueue)
         if session.canAddOutput(videoOutput) {
             session.addOutput(videoOutput)
