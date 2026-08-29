@@ -15,22 +15,28 @@ enum SampleHLSStreamError: LocalizedError {
     }
 }
 
+@MainActor
 final class SampleHLSStreamer {
+    private struct ActiveStream {
+        let publisher: HLSStreamPublisher
+        let uploadTask: Task<Void, Never>
+    }
+
     private let recorder: HLSSegmentRecorder
-    private let fragmentSeconds: Double
     private let targetDurationSec: Int
 
-    private var uploadCoordinator: HLSUploadCoordinator?
-    private var uploadChannel: HLSUploadEventChannel?
-    private var uploadTask: Task<Void, Never>?
-    private var lastSnapshot: HLSUploadSnapshot?
+    private var activeStream: ActiveStream?
+    private var lastSnapshot: HLSStreamSnapshot?
+    private var isPreviewRunning = false
+    private var recordingStartedAt: Date?
 
     var captureSession: AVCaptureSession {
         recorder.captureSession
     }
 
     var recordedSeconds: Double {
-        recorder.recordedSeconds
+        guard let recordingStartedAt else { return 0 }
+        return Date().timeIntervalSince(recordingStartedAt)
     }
 
     init(
@@ -38,15 +44,14 @@ final class SampleHLSStreamer {
         targetDurationSec: Int = 2,
         recorder: HLSSegmentRecorder? = nil
     ) {
-        self.fragmentSeconds = fragmentSeconds
         self.targetDurationSec = targetDurationSec
         self.recorder = recorder ?? HLSSegmentRecorder(config: .init(segmentSeconds: fragmentSeconds))
     }
 
     func startPreview() async throws {
-        if !recorder.isRunning {
-            try await recorder.start()
-        }
+        guard !isPreviewRunning else { return }
+        try await recorder.start()
+        isPreviewRunning = true
     }
 
     func checkServer(baseURL: URL) async throws {
@@ -54,79 +59,49 @@ final class SampleHLSStreamer {
         try await client.healthCheck()
     }
 
-    func startRecording(serverBaseURL: URL) async throws -> HLSUploadSnapshot {
-        guard uploadCoordinator == nil else {
+    func startRecording(serverBaseURL: URL) async throws -> HLSStreamSnapshot {
+        guard activeStream == nil else {
             throw SampleHLSStreamError.recordingAlreadyActive
         }
 
         let client = try HTTPHLSClient(baseURL: serverBaseURL)
         try await client.healthCheck()
 
-        let streamId = Self.makeStreamId()
-        let coordinator = HLSUploadCoordinator(
+        let publisher = HLSStreamPublisher(
             client: client,
-            streamId: streamId,
+            streamId: Self.makeStreamId(),
             targetDurationSec: targetDurationSec
         )
-        let channel = HLSUploadEventChannel()
-
-        recorder.onInitSegment = { [channel] data in
-            channel.yield(.initialization(data))
-        }
-        recorder.onMediaSegment = { [channel, fragmentSeconds] seq, data, _ in
-            channel.yield(.media(seq: seq, data: data, durationSec: fragmentSeconds))
+        let fragments = try await recorder.startRecording()
+        let uploadTask = Task {
+            await publisher.publish(fragments)
         }
 
-        uploadCoordinator = coordinator
-        uploadChannel = channel
+        activeStream = ActiveStream(publisher: publisher, uploadTask: uploadTask)
         lastSnapshot = nil
-        uploadTask = Task {
-            await coordinator.consume(channel.stream, channel: channel)
-        }
-
-        do {
-            try await recorder.startRecording()
-        } catch {
-            channel.finish()
-            await uploadTask?.value
-            resetUploadState()
-            throw error
-        }
-
-        return await coordinator.snapshot(pendingUploadCount: channel.pendingCount)
+        recordingStartedAt = .now
+        return await publisher.snapshot()
     }
 
-    func stopRecording() async throws -> HLSUploadSnapshot {
-        guard let coordinator = uploadCoordinator,
-              let channel = uploadChannel,
-              let uploadTask else {
+    func stopRecording() async throws -> HLSStreamSnapshot {
+        guard let activeStream else {
             throw SampleHLSStreamError.noActiveStream
         }
 
         await recorder.stop()
-        channel.finish()
-        await uploadTask.value
+        await activeStream.uploadTask.value
 
-        let snapshot = await coordinator.snapshot(pendingUploadCount: channel.pendingCount)
+        let snapshot = await activeStream.publisher.snapshot()
         lastSnapshot = snapshot
-        resetUploadState()
+        self.activeStream = nil
+        recordingStartedAt = nil
+        isPreviewRunning = false
         return snapshot
     }
 
-    func currentSnapshot() async -> HLSUploadSnapshot? {
-        guard let coordinator = uploadCoordinator,
-              let channel = uploadChannel else {
-            return lastSnapshot
-        }
-        return await coordinator.snapshot(pendingUploadCount: channel.pendingCount)
-    }
-
-    private func resetUploadState() {
-        recorder.onInitSegment = nil
-        recorder.onMediaSegment = nil
-        uploadCoordinator = nil
-        uploadChannel = nil
-        uploadTask = nil
+    func currentSnapshot() async -> HLSStreamSnapshot? {
+        guard let activeStream else { return lastSnapshot }
+        return await activeStream.publisher.snapshot()
     }
 
     private static func makeStreamId() -> String {

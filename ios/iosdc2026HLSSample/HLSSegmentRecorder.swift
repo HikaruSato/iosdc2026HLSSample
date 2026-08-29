@@ -1,15 +1,16 @@
 @preconcurrency import AVFoundation
 import Foundation
 
-final class HLSSegmentRecorder: NSObject {
-    struct Config {
+// CaptureSession state and Writer state are confined to their dedicated serial queues.
+final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
+    struct Config: Sendable {
         var videoSize = CGSize(width: 720, height: 1280)
         var videoBitrate = 1_500_000
         var audioBitrate = 64_000
         var segmentSeconds = 2.0
     }
 
-    private var config: Config
+    private let config: Config
     private let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "sample.capture.session.queue")
     private let writingQueue = DispatchQueue(label: "sample.hls.writer.queue")
@@ -17,35 +18,21 @@ final class HLSSegmentRecorder: NSObject {
     private let videoOutput = AVCaptureVideoDataOutput()
     private let audioOutput = AVCaptureAudioDataOutput()
 
+    // writingQueue only
     private var writer: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
     private var audioInput: AVAssetWriterInput?
-
+    private var fragmentContinuation: AsyncThrowingStream<HLSFragment, Error>.Continuation?
     private var isWriting = false
-    private var isStopping = false
     private var didStartSession = false
-    private var recordingStartedAt: Date?
-
-    private let startTimeOffset = CMTime(value: 10, timescale: 1)
-    private var firstVideoPTS: CMTime?
     private var timeOffsetDelta: CMTime?
     private var lastAdjustedPTS: CMTime = .invalid
     private var segmentIndex = 0
 
-    var onInitSegment: ((Data) -> Void)?
-    var onMediaSegment: ((Int, Data, AVAssetSegmentReport?) -> Void)?
+    private let startTimeOffset = CMTime(value: 10, timescale: 1)
 
     var captureSession: AVCaptureSession {
         session
-    }
-
-    var isRunning: Bool {
-        session.isRunning
-    }
-
-    var recordedSeconds: Double {
-        guard let recordingStartedAt else { return 0 }
-        return Date().timeIntervalSince(recordingStartedAt)
     }
 
     init(config: Config) {
@@ -57,6 +44,11 @@ final class HLSSegmentRecorder: NSObject {
         try await withCheckedThrowingContinuation { continuation in
             sessionQueue.async {
                 do {
+                    guard !self.session.isRunning else {
+                        continuation.resume()
+                        return
+                    }
+
                     try self.configureAudioSession()
                     try self.setupCaptureSessionLocked()
                     self.session.startRunning()
@@ -68,41 +60,46 @@ final class HLSSegmentRecorder: NSObject {
         }
     }
 
-    func startRecording() async throws {
+    func startRecording() async throws -> AsyncThrowingStream<HLSFragment, Error> {
+        let fragments = AsyncThrowingStream<HLSFragment, Error>.makeStream()
+
         try await withCheckedThrowingContinuation { continuation in
-            sessionQueue.async {
+            writingQueue.async {
                 do {
+                    guard self.fragmentContinuation == nil else {
+                        throw HLSSegmentRecorderError.recordingAlreadyActive
+                    }
+
                     try self.setupWriterLocked()
+                    self.fragmentContinuation = fragments.continuation
                     self.isWriting = true
-                    self.recordingStartedAt = .now
                     continuation.resume()
                 } catch {
-                    self.isWriting = false
-                    self.recordingStartedAt = nil
+                    fragments.continuation.finish(throwing: error)
                     continuation.resume(throwing: error)
                 }
             }
         }
+
+        return fragments.stream
     }
 
     func stop() async {
-        guard !isStopping else { return }
-        isStopping = true
-
         await withCheckedContinuation { continuation in
             sessionQueue.async {
-                self.isWriting = false
-                self.session.stopRunning()
+                if self.session.isRunning {
+                    self.session.stopRunning()
+                }
                 continuation.resume()
             }
         }
 
         await withCheckedContinuation { continuation in
             writingQueue.async {
-                self.finishWriterLocked {
+                self.isWriting = false
+                self.finishWriterLocked { error in
+                    self.finishFragmentStreamLocked(throwing: error)
                     self.cleanupWriterLocked()
-                    self.recordingStartedAt = nil
-                    self.isStopping = false
                     continuation.resume()
                 }
             }
@@ -119,6 +116,7 @@ final class HLSSegmentRecorder: NSObject {
         if !session.inputs.isEmpty || !session.outputs.isEmpty { return }
 
         session.beginConfiguration()
+        defer { session.commitConfiguration() }
         session.sessionPreset = .high
 
         guard let videoDevice = AVCaptureDevice.default(
@@ -128,7 +126,7 @@ final class HLSSegmentRecorder: NSObject {
         ),
               let videoInput = try? AVCaptureDeviceInput(device: videoDevice),
               session.canAddInput(videoInput) else {
-            throw NSError(domain: "HLSSegmentRecorder.Capture", code: -1)
+            throw HLSSegmentRecorderError.cameraUnavailable
         }
         session.addInput(videoInput)
 
@@ -156,15 +154,12 @@ final class HLSSegmentRecorder: NSObject {
            connection.isVideoRotationAngleSupported(90) {
             connection.videoRotationAngle = 90
         }
-
-        session.commitConfiguration()
     }
 
     private func setupWriterLocked() throws {
         cleanupWriterLocked()
 
         let writer = AVAssetWriter(contentType: .mpeg4Movie)
-        writer.shouldOptimizeForNetworkUse = true
         writer.outputFileTypeProfile = .mpeg4AppleHLS
         writer.preferredOutputSegmentInterval = CMTime(
             seconds: config.segmentSeconds,
@@ -180,7 +175,7 @@ final class HLSSegmentRecorder: NSObject {
         audioInput.expectsMediaDataInRealTime = true
 
         guard writer.canAdd(videoInput), writer.canAdd(audioInput) else {
-            throw NSError(domain: "HLSSegmentRecorder.Writer", code: -2)
+            throw HLSSegmentRecorderError.cannotAddWriterInputs
         }
 
         writer.add(videoInput)
@@ -189,9 +184,7 @@ final class HLSSegmentRecorder: NSObject {
         self.writer = writer
         self.videoInput = videoInput
         self.audioInput = audioInput
-
         didStartSession = false
-        firstVideoPTS = nil
         timeOffsetDelta = nil
         lastAdjustedPTS = .invalid
         segmentIndex = 0
@@ -220,24 +213,69 @@ final class HLSSegmentRecorder: NSObject {
         ]
     }
 
-    private func finishWriterLocked(completion: @escaping () -> Void) {
+    private func finishWriterLocked(completion: @escaping @Sendable (Error?) -> Void) {
         guard let writer else {
-            completion()
+            completion(nil)
             return
         }
 
-        guard writer.status == .writing else {
-            completion()
-            return
-        }
+        switch writer.status {
+        case .writing:
+            if lastAdjustedPTS.isValid {
+                writer.endSession(atSourceTime: lastAdjustedPTS)
+            }
 
-        if lastAdjustedPTS.isValid {
-            writer.endSession(atSourceTime: lastAdjustedPTS)
-        }
+            videoInput?.markAsFinished()
+            audioInput?.markAsFinished()
+            writer.finishWriting { [self] in
+                writingQueue.async { [self] in
+                    let error = self.writer?.status == .completed
+                        ? nil
+                        : HLSSegmentRecorderError.writerFailed(
+                            action: "finishWriting",
+                            reason: self.writer?.error?.localizedDescription
+                        )
+                    completion(error)
+                }
+            }
 
-        videoInput?.markAsFinished()
-        audioInput?.markAsFinished()
-        writer.finishWriting(completionHandler: completion)
+        case .failed, .cancelled:
+            completion(HLSSegmentRecorderError.writerFailed(
+                action: "finishWriting",
+                reason: writer.error?.localizedDescription
+            ))
+
+        case .unknown, .completed:
+            completion(nil)
+
+        @unknown default:
+            completion(HLSSegmentRecorderError.writerFailed(
+                action: "finishWriting",
+                reason: writer.error?.localizedDescription
+            ))
+        }
+    }
+
+    private func failWriterLocked(action: String) {
+        let error = HLSSegmentRecorderError.writerFailed(
+            action: action,
+            reason: writer?.error?.localizedDescription
+        )
+        if writer?.status == .writing {
+            writer?.cancelWriting()
+        }
+        isWriting = false
+        finishFragmentStreamLocked(throwing: error)
+        cleanupWriterLocked()
+    }
+
+    private func finishFragmentStreamLocked(throwing error: Error?) {
+        if let error {
+            fragmentContinuation?.finish(throwing: error)
+        } else {
+            fragmentContinuation?.finish()
+        }
+        fragmentContinuation = nil
     }
 
     private func cleanupWriterLocked() {
@@ -245,16 +283,18 @@ final class HLSSegmentRecorder: NSObject {
         videoInput = nil
         audioInput = nil
         didStartSession = false
-        firstVideoPTS = nil
         timeOffsetDelta = nil
         lastAdjustedPTS = .invalid
     }
 }
 
 extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard isWriting else { return }
-        guard CMSampleBufferDataIsReady(sampleBuffer) else { return }
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        guard isWriting, CMSampleBufferDataIsReady(sampleBuffer) else { return }
 
         startWriterIfNeeded(output: output, sampleBuffer: sampleBuffer)
         append(output: output, sampleBuffer: sampleBuffer)
@@ -264,21 +304,19 @@ extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCa
         guard output === videoOutput else { return }
         guard !didStartSession, let writer else { return }
 
-        didStartSession = true
         guard writer.startWriting() else {
-            print("startWriting failed:", writer.error as Any)
+            failWriterLocked(action: "startWriting")
             return
         }
 
+        didStartSession = true
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         writer.startSession(atSourceTime: startTimeOffset)
-        firstVideoPTS = pts
         timeOffsetDelta = startTimeOffset - pts
     }
 
     private func append(output: AVCaptureOutput, sampleBuffer: CMSampleBuffer) {
         guard didStartSession,
-              let writer,
               let videoInput,
               let audioInput,
               let timeOffsetDelta else { return }
@@ -287,15 +325,12 @@ extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCa
         do {
             adjustedSampleBuffer = try sampleBuffer.offsettingTiming(by: timeOffsetDelta)
         } catch {
-            adjustedSampleBuffer = sampleBuffer
+            failWriterLocked(action: "adjust sample timing")
+            return
         }
 
         let adjustedPTS = CMSampleBufferGetPresentationTimeStamp(adjustedSampleBuffer)
-        if lastAdjustedPTS.isValid {
-            if adjustedPTS > lastAdjustedPTS {
-                lastAdjustedPTS = adjustedPTS
-            }
-        } else {
+        if !lastAdjustedPTS.isValid || adjustedPTS > lastAdjustedPTS {
             lastAdjustedPTS = adjustedPTS
         }
 
@@ -309,7 +344,7 @@ extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCa
         }
 
         if !didAppend {
-            print("append failed:", writer.status.rawValue, writer.error as Any)
+            failWriterLocked(action: "append")
         }
     }
 }
@@ -321,14 +356,57 @@ extension HLSSegmentRecorder: AVAssetWriterDelegate {
         segmentType: AVAssetSegmentType,
         segmentReport: AVAssetSegmentReport?
     ) {
-        switch segmentType {
-        case .initialization:
-            onInitSegment?(segmentData)
-        case .separable:
-            segmentIndex += 1
-            onMediaSegment?(segmentIndex, segmentData, segmentReport)
-        @unknown default:
-            break
+        let duration = segmentDuration(from: segmentReport)
+
+        writingQueue.async {
+            guard let continuation = self.fragmentContinuation else { return }
+
+            switch segmentType {
+            case .initialization:
+                continuation.yield(.initialization(segmentData))
+
+            case .separable:
+                self.segmentIndex += 1
+                continuation.yield(.media(
+                    sequence: self.segmentIndex,
+                    data: segmentData,
+                    duration: duration
+                ))
+
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    private func segmentDuration(from report: AVAssetSegmentReport?) -> Double {
+        guard let track = report?.trackReports.first(where: { $0.mediaType == .video }) else {
+            return config.segmentSeconds
+        }
+
+        let duration = track.duration.seconds
+        return duration.isFinite && duration > 0 ? duration : config.segmentSeconds
+    }
+}
+
+enum HLSSegmentRecorderError: LocalizedError {
+    case recordingAlreadyActive
+    case cameraUnavailable
+    case cannotAddWriterInputs
+    case writerFailed(action: String, reason: String?)
+
+    var errorDescription: String? {
+        switch self {
+        case .recordingAlreadyActive:
+            return "すでに録画中です"
+        case .cameraUnavailable:
+            return "カメラをCaptureSessionへ追加できませんでした"
+        case .cannotAddWriterInputs:
+            return "映像または音声をAVAssetWriterへ追加できませんでした"
+        case let .writerFailed(action, reason):
+            return ["AVAssetWriterの\(action)に失敗しました", reason]
+                .compactMap { $0 }
+                .joined(separator: ": ")
         }
     }
 }

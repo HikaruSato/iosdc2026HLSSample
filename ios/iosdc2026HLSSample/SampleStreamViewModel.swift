@@ -30,7 +30,6 @@ import Observation
     private(set) var playlistURL: URL?
     private(set) var playlistText = ""
     private(set) var segmentCount = 0
-    private(set) var pendingUploadCount = 0
     private(set) var elapsedSeconds = 0.0
     private(set) var operationErrorMessage: String?
 
@@ -143,7 +142,6 @@ import Observation
         serverState = .checking
         elapsedSeconds = 0
         segmentCount = 0
-        pendingUploadCount = 0
         playlistText = ""
 
         do {
@@ -239,13 +237,12 @@ import Observation
         }
     }
 
-    private func apply(_ snapshot: HLSUploadSnapshot) {
+    private func apply(_ snapshot: HLSStreamSnapshot) {
         streamId = snapshot.streamId
         viewerURL = snapshot.viewerURL
         playlistURL = snapshot.playlistURL
         playlistText = snapshot.playlistText
         segmentCount = snapshot.segmentCount
-        pendingUploadCount = snapshot.pendingUploadCount
     }
 
     private func makeServerURL(from text: String) throws -> URL {

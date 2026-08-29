@@ -19,10 +19,25 @@ iPhone
 
 - iOSはカメラとマイクの`CMSampleBuffer`を`AVAssetWriter`へ渡します。
 - `AVAssetWriterDelegate`から`init.mp4`とfragmented MP4のsegmentを受け取ります。
+- media segmentの実際の長さを`AVAssetSegmentReport`から取得し、取得できない場合だけ2秒へフォールバックします。
 - `init.mp4`を最初に1回アップロードします。
 - 各segmentをアップロードしてから、そのsegmentを追加した`playlist.m3u8`をアップロードします。
 - 停止時は`#EXT-X-ENDLIST`を追加したplaylistをアップロードします。
 - ブラウザは最新のstreamを自動選択し、SafariのネイティブHLSまたは同梱したhls.jsで再生します。
+
+### iOS側の責務
+
+```text
+SampleHLSStreamer
+  └── HLSSegmentRecorder ── AsyncThrowingStream<HLSFragment> ──> HLSStreamPublisher
+                                                                  ├── HLSManifest
+                                                                  └── HTTPHLSClient
+```
+
+- `HLSSegmentRecorder`はcapture、encode、fMP4 fragment生成だけを担当します。
+- `HLSStreamPublisher`はfragmentを1つずつ受け取り、init、segment、playlist、ENDLISTの公開順とretryを管理します。
+- `HLSManifest`はplaylistの状態とrender、`HTTPHLSClient`はURLとHTTP PUTだけを担当します。
+- `SampleHLSStreamer`はRecorderとPublisherを接続し、停止時に最後のfragmentとENDLISTの公開完了まで待ちます。
 
 ## ディレクトリ
 

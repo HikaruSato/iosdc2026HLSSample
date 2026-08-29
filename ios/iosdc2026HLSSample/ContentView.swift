@@ -172,11 +172,6 @@ struct ContentView: View {
                     .monospacedDigit()
             }
 
-            LabeledContent("pending upload") {
-                Text("\(vm.pendingUploadCount)")
-                    .monospacedDigit()
-            }
-
             if let streamId = vm.streamId {
                 LabeledContent("streamId") {
                     Text(streamId)

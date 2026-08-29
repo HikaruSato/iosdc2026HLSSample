@@ -1,6 +1,6 @@
 import Foundation
 
-protocol HTTPHLSClientProtocol: Sendable {
+protocol HLSClient: Sendable {
     var viewerURL: URL { get }
 
     func healthCheck() async throws
@@ -27,7 +27,7 @@ enum HTTPHLSClientError: LocalizedError {
     }
 }
 
-struct HTTPHLSClient: HTTPHLSClientProtocol {
+struct HTTPHLSClient: HLSClient {
     let viewerURL: URL
 
     private let session: URLSession

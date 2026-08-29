@@ -15,10 +15,10 @@
 		A00000000000000000000035 /* HLSManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000025 /* HLSManifest.swift */; };
 		A00000000000000000000036 /* HLSSegmentRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000026 /* HLSSegmentRecorder.swift */; };
 		A00000000000000000000037 /* CameraPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000027 /* CameraPreviewView.swift */; };
-		A00000000000000000000038 /* HLSUploadCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000028 /* HLSUploadCoordinator.swift */; };
+		A00000000000000000000038 /* HLSStreamPublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000028 /* HLSStreamPublisher.swift */; };
 		A0000000000000000000003A /* HLSManifestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002A /* HLSManifestTests.swift */; };
 		A0000000000000000000003B /* HTTPHLSClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002B /* HTTPHLSClientTests.swift */; };
-		A0000000000000000000003C /* HLSUploadCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002C /* HLSUploadCoordinatorTests.swift */; };
+		A0000000000000000000003C /* HLSStreamPublisherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002C /* HLSStreamPublisherTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -42,11 +42,11 @@
 		A00000000000000000000025 /* HLSManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HLSManifest.swift; sourceTree = "<group>"; };
 		A00000000000000000000026 /* HLSSegmentRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HLSSegmentRecorder.swift; sourceTree = "<group>"; };
 		A00000000000000000000027 /* CameraPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPreviewView.swift; sourceTree = "<group>"; };
-		A00000000000000000000028 /* HLSUploadCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HLSUploadCoordinator.swift; sourceTree = "<group>"; };
+		A00000000000000000000028 /* HLSStreamPublisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HLSStreamPublisher.swift; sourceTree = "<group>"; };
 		A00000000000000000000029 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A0000000000000000000002A /* HLSManifestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HLSManifestTests.swift; sourceTree = "<group>"; };
 		A0000000000000000000002B /* HTTPHLSClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPHLSClientTests.swift; sourceTree = "<group>"; };
-		A0000000000000000000002C /* HLSUploadCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HLSUploadCoordinatorTests.swift; sourceTree = "<group>"; };
+		A0000000000000000000002C /* HLSStreamPublisherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HLSStreamPublisherTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -96,7 +96,7 @@
 				A00000000000000000000025 /* HLSManifest.swift */,
 				A00000000000000000000026 /* HLSSegmentRecorder.swift */,
 				A00000000000000000000027 /* CameraPreviewView.swift */,
-				A00000000000000000000028 /* HLSUploadCoordinator.swift */,
+				A00000000000000000000028 /* HLSStreamPublisher.swift */,
 				A00000000000000000000029 /* Info.plist */,
 			);
 			path = iosdc2026HLSSample;
@@ -107,7 +107,7 @@
 			children = (
 				A0000000000000000000002A /* HLSManifestTests.swift */,
 				A0000000000000000000002B /* HTTPHLSClientTests.swift */,
-				A0000000000000000000002C /* HLSUploadCoordinatorTests.swift */,
+				A0000000000000000000002C /* HLSStreamPublisherTests.swift */,
 			);
 			path = iosdc2026HLSSampleTests;
 			sourceTree = "<group>";
@@ -219,7 +219,7 @@
 				A00000000000000000000035 /* HLSManifest.swift in Sources */,
 				A00000000000000000000036 /* HLSSegmentRecorder.swift in Sources */,
 				A00000000000000000000037 /* CameraPreviewView.swift in Sources */,
-				A00000000000000000000038 /* HLSUploadCoordinator.swift in Sources */,
+				A00000000000000000000038 /* HLSStreamPublisher.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -229,7 +229,7 @@
 			files = (
 				A0000000000000000000003A /* HLSManifestTests.swift in Sources */,
 				A0000000000000000000003B /* HTTPHLSClientTests.swift in Sources */,
-				A0000000000000000000003C /* HLSUploadCoordinatorTests.swift in Sources */,
+				A0000000000000000000003C /* HLSStreamPublisherTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -385,7 +385,8 @@
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SWIFT_VERSION = 5.0;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
@@ -412,7 +413,8 @@
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SWIFT_VERSION = 5.0;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
@@ -431,7 +433,8 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = 1;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/iosdc2026HLSSample.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/iosdc2026HLSSample";
 			};
@@ -451,7 +454,8 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = 1;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/iosdc2026HLSSample.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/iosdc2026HLSSample";
 			};
