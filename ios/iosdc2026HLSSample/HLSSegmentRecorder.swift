@@ -50,7 +50,7 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
     // VideoとAudioへ同じoffsetを加えることで、両者の相対的な時刻差は変えない。
     private let startTimeOffset = CMTime(value: 10, timescale: 1)
 
-    /// SwiftUIのプレビュー表示に使うCaptureSession。
+    /// 画面のプレビュー表示に使うCaptureSession。
     var captureSession: AVCaptureSession {
         session
     }
