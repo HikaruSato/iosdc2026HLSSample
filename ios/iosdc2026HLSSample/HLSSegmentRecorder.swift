@@ -37,8 +37,8 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
 
     // 以下のmutable stateはwritingQueueからだけ読み書きする。
     private var writer: AVAssetWriter?
-    private var videoInput: AVAssetWriterInput?
-    private var audioInput: AVAssetWriterInput?
+    private var videoReceiver: AVAssetWriterInput.SampleBufferReceiver?
+    private var audioReceiver: AVAssetWriterInput.SampleBufferReceiver?
     private var fragmentContinuation: AsyncThrowingStream<HLSFragment, Error>.Continuation?
     private var isWriting = false
     private var didStartSession = false
@@ -220,12 +220,13 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
             throw HLSSegmentRecorderError.cannotAddWriterInputs
         }
 
-        writer.add(videoInput)
-        writer.add(audioInput)
+        // inputReceiver(for:)はInputをWriterへ接続し、sampleを書き込む窓口を返す。
+        let videoReceiver = writer.inputReceiver(for: videoInput)
+        let audioReceiver = writer.inputReceiver(for: audioInput)
 
         self.writer = writer
-        self.videoInput = videoInput
-        self.audioInput = audioInput
+        self.videoReceiver = videoReceiver
+        self.audioReceiver = audioReceiver
         didStartSession = false
         timeOffsetDelta = nil
         lastAdjustedPTS = .invalid
@@ -272,8 +273,8 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
                 writer.endSession(atSourceTime: lastAdjustedPTS)
             }
 
-            videoInput?.markAsFinished()
-            audioInput?.markAsFinished()
+            videoReceiver?.finish()
+            audioReceiver?.finish()
             // finishWritingにより、残っている最後のsegmentがdelegateへ届く可能性がある。
             writer.finishWriting { [self] in
                 writingQueue.async { [self] in
@@ -304,10 +305,10 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
         }
     }
 
-    private func failWriterLocked(action: String) {
+    private func failWriterLocked(action: String, underlyingError: Error? = nil) {
         let error = HLSSegmentRecorderError.writerFailed(
             action: action,
-            reason: writer?.error?.localizedDescription
+            reason: writer?.error?.localizedDescription ?? underlyingError?.localizedDescription
         )
         if writer?.status == .writing {
             writer?.cancelWriting()
@@ -329,8 +330,8 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
 
     private func cleanupWriterLocked() {
         writer = nil
-        videoInput = nil
-        audioInput = nil
+        videoReceiver = nil
+        audioReceiver = nil
         didStartSession = false
         timeOffsetDelta = nil
         lastAdjustedPTS = .invalid
@@ -357,8 +358,10 @@ extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCa
         guard output === videoOutput else { return }
         guard !didStartSession, let writer else { return }
 
-        guard writer.startWriting() else {
-            failWriterLocked(action: "startWriting")
+        do {
+            try writer.start()
+        } catch {
+            failWriterLocked(action: "start", underlyingError: error)
             return
         }
 
@@ -371,8 +374,8 @@ extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCa
 
     private func append(output: AVCaptureOutput, sampleBuffer: CMSampleBuffer) {
         guard didStartSession,
-              let videoInput,
-              let audioInput,
+              let videoReceiver,
+              let audioReceiver,
               let timeOffsetDelta else { return }
 
         let adjustedSampleBuffer: CMSampleBuffer
@@ -389,18 +392,19 @@ extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCa
             lastAdjustedPTS = adjustedPTS
         }
 
-        let didAppend: Bool
-        if output === videoOutput {
-            // Writerが詰まったときは待機queueを作らず、そのsampleを落として遅延をboundedにする。
-            guard videoInput.isReadyForMoreMediaData else { return }
-            didAppend = videoInput.append(adjustedSampleBuffer)
-        } else {
-            guard audioInput.isReadyForMoreMediaData else { return }
-            didAppend = audioInput.append(adjustedSampleBuffer)
-        }
-
-        if !didAppend {
-            failWriterLocked(action: "append")
+        do {
+            // このcopyはwritingQueue内で以後参照しないため、Receiverへ所有権を渡してよい。
+            nonisolated(unsafe) let transferableSampleBuffer = adjustedSampleBuffer
+            let readySampleBuffer = CMReadySampleBuffer(unsafeBuffer: transferableSampleBuffer)
+            // appendImmediatelyはWriterを待たない。受け入れ不可ならfalseを返すため、そのsampleを落とす。
+            let didAppend = if output === videoOutput {
+                try videoReceiver.appendImmediately(readySampleBuffer)
+            } else {
+                try audioReceiver.appendImmediately(readySampleBuffer)
+            }
+            guard didAppend else { return }
+        } catch {
+            failWriterLocked(action: "append", underlyingError: error)
         }
     }
 }

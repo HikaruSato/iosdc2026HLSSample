@@ -18,6 +18,7 @@ iPhone
 ```
 
 - iOSはカメラとマイクの`CMSampleBuffer`を`AVAssetWriter`へ渡します。
+- `AVAssetWriter.inputReceiver(for:)`でVideo／Audio Inputを接続し、`SampleBufferReceiver`へsampleを書き込みます。
 - `AVAssetWriterDelegate`から`init.mp4`とfragmented MP4のsegmentを受け取ります。
 - media segmentの実際の長さを`AVAssetSegmentReport`から取得し、取得できない場合だけ2秒へフォールバックします。
 - `init.mp4`を最初に1回アップロードします。
@@ -73,6 +74,7 @@ ffplay playlist.m3u8
 
 ## 実行
 
+iOSアプリはiOS 26以上を対象とし、iOS 26 SDKを含むXcodeでビルドします。
 Python 3.10以上を使います。追加パッケージのインストールは不要です。
 
 ### 同じネットワークで確認する
