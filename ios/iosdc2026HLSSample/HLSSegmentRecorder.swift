@@ -1,7 +1,7 @@
 @preconcurrency import AVFoundation
 import Foundation
 
-/// カメラとマイクのsample bufferを、HLS用のfMP4 fragmentへ変換するRecorder。
+/// カメラとマイクのCMSampleBufferを、HLS用のfMP4 fragmentへ変換するRecorder。
 ///
 /// データは次の順に流れる。
 ///
@@ -31,7 +31,7 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
     // callback先はserialなDispatchQueueとして持つ。Writerの状態とfragmentの連番もここで更新する。
     private let writingQueue = DispatchQueue(label: "sample.hls.writer.queue")
 
-    // MovieFileOutputではなくDataOutputを使い、完成ファイルになる前のsampleを受け取る。
+    // MovieFileOutputではなくDataOutputを使い、完成ファイルになる前のCMSampleBufferを受け取る。
     private let videoOutput = AVCaptureVideoDataOutput()
     private let audioOutput = AVCaptureAudioDataOutput()
 
@@ -46,7 +46,7 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
     private var lastAdjustedPTS: CMTime = .invalid
     private var segmentIndex = 0
 
-    // AACのprimingを含むsampleにも余白を持たせるため、Writerのtimelineを10秒から始める。
+    // AACのprimingを含むCMSampleBufferにも余白を持たせるため、Writerのtimelineを10秒から始める。
     // VideoとAudioへ同じoffsetを加えることで、両者の相対的な時刻差は変えない。
     private let startTimeOffset = CMTime(value: 10, timescale: 1)
 
@@ -62,7 +62,7 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
 
     // MARK: - Capture lifecycle
 
-    /// カメラとマイクを構成し、sample bufferの受信を開始する。
+    /// カメラとマイクを構成し、CMSampleBufferの受信を開始する。
     /// HLS Writerは``startRecording()``を呼ぶまで作らない。
     func start() async throws {
         try await withCheckedThrowingContinuation { continuation in
@@ -110,9 +110,9 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
         return fragments.stream
     }
 
-    /// Captureを止めてsample callbackをdrainした後、Writerとfragment streamを閉じる。
+    /// Captureを止めてCMSampleBuffer callbackをdrainした後、Writerとfragment streamを閉じる。
     func stop() async {
-        // 新しいsampleがwritingQueueへ追加されなくなるまで、先にCaptureSessionの停止を待つ。
+        // 新しいCMSampleBufferがwritingQueueへ追加されなくなるまで、先にCaptureSessionの停止を待つ。
         await withCheckedContinuation { continuation in
             sessionQueue.async {
                 if self.session.isRunning {
@@ -122,7 +122,7 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
             }
         }
 
-        // sessionQueueより前に投入済みのsampleはserialなwritingQueue上で処理済みになる。
+        // sessionQueueより前に投入済みのCMSampleBufferはserialなwritingQueue上で処理済みになる。
         // その後finishWritingし、最後のfragment callbackを受け取ってからstreamを終了する。
         await withCheckedContinuation { continuation in
             writingQueue.async {
@@ -220,7 +220,7 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
             throw HLSSegmentRecorderError.cannotAddWriterInputs
         }
 
-        // inputReceiver(for:)はInputをWriterへ接続し、sampleを書き込む窓口を返す。
+        // inputReceiver(for:)はInputをWriterへ接続し、CMSampleBufferを書き込む窓口を返す。
         let videoReceiver = writer.inputReceiver(for: videoInput)
         let audioReceiver = writer.inputReceiver(for: audioInput)
 
@@ -338,7 +338,7 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
     }
 }
 
-// MARK: - Camera and microphone samples
+// MARK: - Camera and microphone CMSampleBuffer callbacks
 
 extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
     func captureOutput(
@@ -346,7 +346,7 @@ extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCa
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        // 録画中かつ利用可能なsampleだけをWriterへ流し、状態遷移を単純に保つ。
+        // 録画中かつ利用可能なCMSampleBufferだけをWriterへ流し、状態遷移を単純に保つ。
         guard isWriting, CMSampleBufferDataIsReady(sampleBuffer) else { return }
 
         startWriterIfNeeded(output: output, sampleBuffer: sampleBuffer)
@@ -380,29 +380,30 @@ extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCa
 
         let adjustedSampleBuffer: CMSampleBuffer
         do {
-            // 映像・音声の全sampleへ同じdeltaを適用し、A/V syncを保つ。
+            // 映像・音声の全CMSampleBufferへ同じdeltaを適用し、A/V syncを保つ。
             adjustedSampleBuffer = try sampleBuffer.offsettingTiming(by: timeOffsetDelta)
         } catch {
             failWriterLocked(action: "adjust sample timing")
             return
         }
 
-        let adjustedPTS = CMSampleBufferGetPresentationTimeStamp(adjustedSampleBuffer)
-        if !lastAdjustedPTS.isValid || adjustedPTS > lastAdjustedPTS {
-            lastAdjustedPTS = adjustedPTS
-        }
-
         do {
             // このcopyはwritingQueue内で以後参照しないため、Receiverへ所有権を渡してよい。
             nonisolated(unsafe) let transferableSampleBuffer = adjustedSampleBuffer
             let readySampleBuffer = CMReadySampleBuffer(unsafeBuffer: transferableSampleBuffer)
-            // appendImmediatelyはWriterを待たない。受け入れ不可ならfalseを返すため、そのsampleを落とす。
+            // appendImmediatelyはWriterを待たない。受け入れ不可ならfalseを返すため、そのCMSampleBufferを落とす。
             let didAppend = if output === videoOutput {
                 try videoReceiver.appendImmediately(readySampleBuffer)
             } else {
                 try audioReceiver.appendImmediately(readySampleBuffer)
             }
             guard didAppend else { return }
+
+            // endSessionへ渡すのは、Receiverが実際に受け入れた最後のPTS。
+            let adjustedPTS = CMSampleBufferGetPresentationTimeStamp(adjustedSampleBuffer)
+            if !lastAdjustedPTS.isValid || adjustedPTS > lastAdjustedPTS {
+                lastAdjustedPTS = adjustedPTS
+            }
         } catch {
             failWriterLocked(action: "append", underlyingError: error)
         }
@@ -481,7 +482,7 @@ enum HLSSegmentRecorderError: LocalizedError {
 // MARK: - Sample timing correction
 
 private extension CMSampleBuffer {
-    /// sampleの内容は変えず、PTSと有効なDTSを同じ量だけ平行移動したコピーを作る。
+    /// CMSampleBufferの内容は変えず、PTSと有効なDTSを同じ量だけ平行移動したコピーを作る。
     func offsettingTiming(by offset: CMTime) throws -> CMSampleBuffer {
         let timingInfos: [CMSampleTimingInfo]
         do {
