@@ -37,6 +37,8 @@ struct ContentView: View {
                     Task {
                         await vm.stopIfNeeded()
                     }
+                } else if newPhase == .active {
+                    vm.onForeground()
                 }
             }
         }
@@ -65,7 +67,7 @@ struct ContentView: View {
                 .onSubmit {
                     isServerURLFocused = false
                 }
-                .disabled(vm.isRecording)
+                .disabled(vm.isRecording || vm.isBusy)
 
             Button {
                 isServerURLFocused = false
@@ -77,7 +79,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
-            .disabled(serverURLText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vm.isRecording)
+            .disabled(serverURLText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vm.isRecording || vm.isBusy)
 
             if let serverErrorMessage = vm.serverErrorMessage {
                 Text(serverErrorMessage)
@@ -136,7 +138,7 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .tint(vm.isRecording ? .red : .blue)
-                .disabled(!vm.canToggleRecording || serverURLText.isEmpty)
+                .disabled(!vm.canToggleRecording || vm.isBusy || serverURLText.isEmpty)
 
                 if let viewerURL = vm.viewerURL {
                     ShareLink(item: viewerURL) {
@@ -153,6 +155,21 @@ struct ContentView: View {
                     .font(.footnote)
                     .foregroundStyle(.red)
                     .textSelection(.enabled)
+            }
+            Text("終了時にフルHD・HEVCの動画を写真へ自動保存")
+                .font(.footnote)
+            if let message = vm.saveMessage {
+                Label(message, systemImage: vm.isSaving ? "hourglass" : "checkmark.circle")
+            }
+            if let message = vm.saveErrorMessage {
+                Text(message).foregroundStyle(.red)
+                Link("設定を開く", destination: URL(string: UIApplication.openSettingsURLString)!)
+            }
+            if !vm.pendingVideos.isEmpty {
+                Button("未保存の動画を写真へ保存（\(vm.pendingVideos.count)件）") {
+                    Task { await vm.retrySaving() }
+                }
+                .disabled(vm.isBusy || vm.isRecording)
             }
         }
     }

@@ -6,6 +6,7 @@ import Foundation
 /// データは次の順に流れる。
 ///
 /// `AVCaptureSession → CMSampleBuffer → AVAssetWriter → HLSFragment`
+/// 同じcallbackからLocalVideoWriterへも独立したコピーを渡し、保存用MP4を作る。
 ///
 /// CaptureSessionの状態は`sessionQueue`、Writerと時刻の状態は`writingQueue`へ閉じ込める。
 /// このqueue confinementを契約として、delegateから参照される自身を`@unchecked Sendable`にしている。
@@ -37,6 +38,7 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
 
     // 以下のmutable stateはwritingQueueからだけ読み書きする。
     private var writer: AVAssetWriter?
+    private var localWriter: LocalVideoWriter?
     private var videoReceiver: AVAssetWriterInput.SampleBufferReceiver?
     private var audioReceiver: AVAssetWriterInput.SampleBufferReceiver?
     private var fragmentContinuation: AsyncThrowingStream<HLSFragment, Error>.Continuation?
@@ -92,15 +94,20 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
         try await withCheckedThrowingContinuation { continuation in
             writingQueue.async {
                 do {
-                    guard self.fragmentContinuation == nil else {
+                    guard !self.isWriting, self.localWriter == nil else {
                         throw HLSSegmentRecorderError.recordingAlreadyActive
                     }
 
                     try self.setupWriterLocked()
+                    self.localWriter = try LocalVideoWriter()
                     self.fragmentContinuation = fragments.continuation
                     self.isWriting = true
                     continuation.resume()
                 } catch {
+                    if !self.isWriting {
+                        self.writer?.cancelWriting()
+                        self.cleanupWriterLocked()
+                    }
                     fragments.continuation.finish(throwing: error)
                     continuation.resume(throwing: error)
                 }
@@ -111,7 +118,7 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
     }
 
     /// Captureを止めてCMSampleBuffer callbackをdrainした後、Writerとfragment streamを閉じる。
-    func stop() async {
+    func stop() async -> LocalRecordingResult {
         // 新しいCMSampleBufferがwritingQueueへ追加されなくなるまで、先にCaptureSessionの停止を待つ。
         await withCheckedContinuation { continuation in
             sessionQueue.async {
@@ -124,13 +131,20 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
 
         // sessionQueueより前に投入済みのCMSampleBufferはserialなwritingQueue上で処理済みになる。
         // その後finishWritingし、最後のfragment callbackを受け取ってからstreamを終了する。
-        await withCheckedContinuation { continuation in
+        return await withCheckedContinuation { continuation in
             writingQueue.async {
                 self.isWriting = false
                 self.finishWriterLocked { error in
                     self.finishFragmentStreamLocked(throwing: error)
                     self.cleanupWriterLocked()
-                    continuation.resume()
+                    guard let localWriter = self.localWriter else {
+                        continuation.resume(returning: .failure(LocalRecordingError(message: "保存用Writerがありません")))
+                        return
+                    }
+                    localWriter.finish(on: self.writingQueue) { result in
+                        self.localWriter = nil
+                        continuation.resume(returning: result)
+                    }
                 }
             }
         }
@@ -149,8 +163,18 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
         if !session.inputs.isEmpty || !session.outputs.isEmpty { return }
 
         session.beginConfiguration()
-        defer { session.commitConfiguration() }
-        session.sessionPreset = .high
+        var configured = false
+        defer {
+            if !configured {
+                session.inputs.forEach { session.removeInput($0) }
+                session.outputs.forEach { session.removeOutput($0) }
+            }
+            session.commitConfiguration()
+        }
+        guard session.canSetSessionPreset(.hd1920x1080) else {
+            throw LocalRecordingError(message: "フルHDで撮影できない端末です")
+        }
+        session.sessionPreset = .hd1920x1080
 
         guard let videoDevice = AVCaptureDevice.default(
             .builtInWideAngleCamera,
@@ -163,11 +187,12 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
         }
         session.addInput(videoInput)
 
-        if let audioDevice = AVCaptureDevice.default(for: .audio),
+        guard let audioDevice = AVCaptureDevice.default(for: .audio),
            let audioInput = try? AVCaptureDeviceInput(device: audioDevice),
-           session.canAddInput(audioInput) {
-            session.addInput(audioInput)
+           session.canAddInput(audioInput) else {
+            throw LocalRecordingError(message: "マイクをCaptureSessionへ追加できません")
         }
+        session.addInput(audioInput)
 
         videoOutput.videoSettings = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
@@ -177,19 +202,23 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
         // AppleのAPI要件に従い、VideoとAudioのdelegateにはserial queueを指定する。
         // 両方を同じwritingQueueへ渡し、Writerへappendする順序も1か所で管理する。
         videoOutput.setSampleBufferDelegate(self, queue: writingQueue)
-        if session.canAddOutput(videoOutput) {
-            session.addOutput(videoOutput)
+        guard session.canAddOutput(videoOutput) else {
+            throw LocalRecordingError(message: "映像出力を追加できません")
         }
+        session.addOutput(videoOutput)
 
         audioOutput.setSampleBufferDelegate(self, queue: writingQueue)
-        if session.canAddOutput(audioOutput) {
-            session.addOutput(audioOutput)
+        guard session.canAddOutput(audioOutput) else {
+            throw LocalRecordingError(message: "音声出力を追加できません")
         }
+        session.addOutput(audioOutput)
 
-        if let connection = videoOutput.connection(with: .video),
-           connection.isVideoRotationAngleSupported(90) {
-            connection.videoRotationAngle = 90
+        guard let connection = videoOutput.connection(with: .video),
+              connection.isVideoRotationAngleSupported(90) else {
+            throw LocalRecordingError(message: "縦向きのフルHD撮影を設定できません")
         }
+        connection.videoRotationAngle = 90
+        configured = true
     }
 
     // MARK: - Writer setup
@@ -313,7 +342,6 @@ final class HLSSegmentRecorder: NSObject, @unchecked Sendable {
         if writer?.status == .writing {
             writer?.cancelWriting()
         }
-        isWriting = false
         // printだけで終わらせず、consumerまで同じエラーを届ける。
         finishFragmentStreamLocked(throwing: error)
         cleanupWriterLocked()
@@ -351,6 +379,7 @@ extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCa
 
         startWriterIfNeeded(output: output, sampleBuffer: sampleBuffer)
         append(output: output, sampleBuffer: sampleBuffer)
+        localWriter?.append(sampleBuffer, isVideo: output === videoOutput)
     }
 
     private func startWriterIfNeeded(output: AVCaptureOutput, sampleBuffer: CMSampleBuffer) {
@@ -388,6 +417,7 @@ extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCa
         }
 
         do {
+            let adjustedPTS = CMSampleBufferGetPresentationTimeStamp(adjustedSampleBuffer)
             // このcopyはwritingQueue内で以後参照しないため、Receiverへ所有権を渡してよい。
             nonisolated(unsafe) let transferableSampleBuffer = adjustedSampleBuffer
             let readySampleBuffer = CMReadySampleBuffer(unsafeBuffer: transferableSampleBuffer)
@@ -400,7 +430,6 @@ extension HLSSegmentRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCa
             guard didAppend else { return }
 
             // endSessionへ渡すのは、Receiverが実際に受け入れた最後のPTS。
-            let adjustedPTS = CMSampleBufferGetPresentationTimeStamp(adjustedSampleBuffer)
             if !lastAdjustedPTS.isValid || adjustedPTS > lastAdjustedPTS {
                 lastAdjustedPTS = adjustedPTS
             }

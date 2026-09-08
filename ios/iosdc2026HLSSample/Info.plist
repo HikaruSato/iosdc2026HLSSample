@@ -35,6 +35,8 @@
     <string>Mac上のHLSサーバーへ動画ファイルを送信します</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>HLSサンプルの録音にマイクを利用します</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>配信終了後にフルHDの動画を写真ライブラリへ保存します</string>
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>

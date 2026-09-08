@@ -1,6 +1,17 @@
 import AVFoundation
 import Foundation
 
+@MainActor
+protocol SampleStreaming {
+    var captureSession: AVCaptureSession { get }
+    var recordedSeconds: Double { get }
+    func startPreview() async throws
+    func checkServer(baseURL: URL) async throws
+    func startRecording(serverBaseURL: URL) async throws -> HLSStreamSnapshot
+    func stopRecording(onLocalRecording: @escaping @MainActor (LocalRecordingResult) async -> Void) async throws -> HLSStreamSnapshot
+    func currentSnapshot() async -> HLSStreamSnapshot?
+}
+
 /// 配信の開始・停止というFacadeの操作に失敗した理由。
 enum SampleHLSStreamError: LocalizedError {
     case recordingAlreadyActive
@@ -20,12 +31,12 @@ enum SampleHLSStreamError: LocalizedError {
 ///
 /// この型自身は映像を加工せず、次の2つを接続する。
 ///
-/// - ``HLSSegmentRecorder``: カメラとマイクからHLS fragmentを生成する
+/// - ``HLSSegmentRecorder``: カメラとマイクからHLS fragmentと保存用MP4を生成する
 /// - ``HLSStreamPublisher``: fragmentを再生可能な順番でHTTP公開する
 ///
 /// UIから安全に状態を参照できるよう、配信中の状態と経過時間はMainActor上で管理する。
 @MainActor
-final class SampleHLSStreamer {
+final class SampleHLSStreamer: SampleStreaming {
     /// Publisherと、その入力streamを消費するTaskは同じ寿命を持つため、1つの状態にまとめる。
     private struct ActiveStream {
         let publisher: HLSStreamPublisher
@@ -101,14 +112,16 @@ final class SampleHLSStreamer {
         return await publisher.snapshot()
     }
 
-    /// 最後のfragmentとENDLIST付きplaylistまで公開してから、配信を終了する。
-    func stopRecording() async throws -> HLSStreamSnapshot {
+    /// MP4完成時の処理を呼び、最後のfragmentとENDLISTの公開も待って終了する。
+    func stopRecording(onLocalRecording: @escaping @MainActor (LocalRecordingResult) async -> Void) async throws -> HLSStreamSnapshot {
         guard let activeStream else {
             throw SampleHLSStreamError.noActiveStream
         }
 
         // 1. Captureを止め、Writerをdrainし、fragment streamを閉じる。
-        await recorder.stop()
+        let localResult = await recorder.stop()
+        // 写真保存はHTTPの滞留を待たず開始する。uploadTaskはその間も進む。
+        await onLocalRecording(localResult)
         // 2. Publisherがstream完了を受け取り、ENDLISTをPUTするまで待つ。
         await activeStream.uploadTask.value
 

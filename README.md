@@ -35,10 +35,25 @@ SampleHLSStreamer
                                                                   └── HTTPHLSClient
 ```
 
-- `HLSSegmentRecorder`はcapture、encode、fMP4 fragment生成だけを担当します。
+- `HLSSegmentRecorder`はcaptureとHLS生成を担当し、同じ撮影データを`LocalVideoWriter`にも渡して保存用MP4を並行生成します。
+- `LocalVideoWriter`は縦向き1080×1920・HEVC（H.265）Main・映像5 Mbps、AAC・96 kbps・44.1 kHz・モノラルでMP4を生成します。
+- HLSには時刻補正したコピー、MP4には撮影時刻のコピーを渡し、両Writerのdropと失敗を独立して扱います。
 - `HLSStreamPublisher`はfragmentを1つずつ受け取り、init、segment、playlist、ENDLISTの公開順とretryを管理します。
 - `HLSManifest`はplaylistの状態とrender、`HTTPHLSClient`はURLとHTTP PUTだけを担当します。
 - `SampleHLSStreamer`はRecorderとPublisherを接続し、停止時に最後のfragmentとENDLISTの公開完了まで待ちます。
+- `PhotoVideoSaver`は完成したMP4を写真ライブラリへ保存します。MP4をサーバーへアップロードしません。
+
+## 配信終了時の端末保存
+
+配信開始にはカメラ・マイクに加えて、写真ライブラリへの追加権限が必要です。写真への追加を拒否した場合は配信を開始しません。設定アプリで許可してください。
+
+撮影は1080pで行い、配信用HLSは従来のH.264・720×1280・1.5 Mbps、保存動画は上記のフルHD・HEVCで生成します。必要な撮影・保存設定に対応しない端末では開始エラーになります。
+
+停止すると両Writerの完了を待ち、写真へ自動保存します。写真保存はHTTP送信完了を待たずに始まり、画面ではHLSと写真保存それぞれの結果を確認できます。「保存しました」の表示後、写真アプリで映像・音声・向きを確認してください。
+
+写真保存に失敗した完成MP4はApplication Supportの`LocalRecordings`に保持し、「未保存の動画を写真へ保存」から再試行できます。アプリ再起動後も未保存動画を表示します。写真保存成功後は作業用ファイルを削除します。未完成の`.recording.mp4`は写真保存対象になりません。
+
+バックグラウンド移行時も停止処理を行い、iOSが許す有限の実行時間で終了処理を保護します。時間切れ時は警告を表示します。継続的なバックグラウンド撮影を保証するサンプルではありません。完成済みMP4が未保存の場合は、アプリに戻って再試行します。
 
 ## ディレクトリ
 
@@ -89,7 +104,8 @@ Python 3.10以上を使います。追加パッケージのインストールは
 3. MacとiPhoneを同じネットワークへ接続します。
 4. サーバー起動時に表示される`http://<MacのIPアドレス>:8080`をiOSアプリの`Mac HTTP Server`へ入力し、`接続確認`を押します。
 5. `ios/iosdc2026HLSSample.xcodeproj`をXcodeで開き、実機でアプリを実行します。
-6. カメラとマイクの権限を許可し、`配信開始`を押します。
+6. カメラとマイクの権限を許可し、`配信開始`を押して写真への追加も許可します。
+7. 停止後に`保存しました`を確認し、写真アプリで保存された動画を再生します。
 
 macOSのファイアウォール確認が表示された場合は、Pythonからの受信接続を許可してください。iOS SimulatorからMac上のサーバーへ接続する場合は`http://localhost:8080`を使用できます。
 
@@ -177,7 +193,7 @@ xcodebuild \
 xcodebuild \
   -project ios/iosdc2026HLSSample.xcodeproj \
   -scheme iosdc2026HLSSample \
-  -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.6' \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.2' \
   CODE_SIGNING_ALLOWED=NO \
   test
 ```
