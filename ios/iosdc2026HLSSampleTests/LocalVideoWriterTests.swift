@@ -1,5 +1,6 @@
 @preconcurrency import AVFoundation
 import Testing
+import Photos
 @testable import iosdc2026HLSSample
 
 struct LocalVideoWriterTests {
@@ -18,21 +19,7 @@ struct LocalVideoWriterTests {
     @Test func generatesPortraitHEVCWithAudioFromSampleBuffers() async throws {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let writer = try LocalVideoWriter(directory: directory)
-        // Writerのqueue confinementを守り、1秒間の映像と無音PCMを入力する。
-        for index in 0..<30 {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                queue.async {
-                    do {
-                        writer.append(try videoSample(index), isVideo: true)
-                        writer.append(try audioSample(index), isVideo: false)
-                        continuation.resume()
-                    } catch { continuation.resume(throwing: error) }
-                }
-            }
-            try await Task.sleep(for: .milliseconds(34))
-        }
-        let url = try await finish(writer).get()
+        let url = try await writeRecording(in: directory)
         #expect(!url.lastPathComponent.contains(".recording."))
         let asset = AVURLAsset(url: url)
         let videos = try await asset.loadTracks(withMediaType: .video)
@@ -47,6 +34,39 @@ struct LocalVideoWriterTests {
         let audio = try #require(audios.first)
         let audioFormats = try await audio.load(.formatDescriptions)
         #expect(audioFormats.first.map { CMFormatDescriptionGetMediaSubType($0) } == kAudioFormatMPEG4AAC)
+    }
+
+    // 専用Simulatorで写真への追加を許可した場合だけ、実際のPhotosのqueueまで検証する。
+    // 通常のテストで権限を要求したり、実機の写真ライブラリを変更したりしない。
+    #if targetEnvironment(simulator)
+    @Test(.enabled(if: PHPhotoLibrary.authorizationStatus(for: .addOnly) == .authorized,
+                   "専用Simulatorでphotos-addを事前に許可して実行"))
+    @MainActor func savesGeneratedMP4UsingPhotoKitQueue() async throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = try await writeRecording(in: directory)
+        let saver = PhotoVideoSaver()
+        try await saver.save(url)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+    #endif
+
+    private func writeRecording(in directory: URL) async throws -> URL {
+        let writer = try LocalVideoWriter(directory: directory)
+        // Writerのqueue confinementを守り、1秒間の映像と無音PCMを入力する。
+        for index in 0..<30 {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                queue.async {
+                    do {
+                        writer.append(try videoSample(index), isVideo: true)
+                        writer.append(try audioSample(index), isVideo: false)
+                        continuation.resume()
+                    } catch { continuation.resume(throwing: error) }
+                }
+            }
+            try await Task.sleep(for: .milliseconds(34))
+        }
+        return try await finish(writer).get()
     }
 
     private let queue = DispatchQueue(label: "test.local.writer")

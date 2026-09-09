@@ -198,6 +198,16 @@ xcodebuild \
   test
 ```
 
+`savesGeneratedMP4UsingPhotoKitQueue`は、実際のPhotosの変更ブロックまで実行する回帰テストです。
+Simulatorで写真への追加が許可済みの場合だけ実行し、実機では実行しません。合成した1秒の動画をSimulatorの写真ライブラリへ追加します。
+実行する場合はテスト専用Simulatorを起動し、次の権限設定後、上のテストコマンドにそのSimulatorのIDと`-parallel-testing-enabled NO`を指定します。
+
+```sh
+xcrun simctl privacy <SIMULATOR_ID> grant photos-add jp.co.hikarusato.iosdc2026HLSSample
+```
+
+写真保存の`performChanges`ブロックはPhotos独自のserial queueで呼ばれるため、`@Sendable`としてMainActorの継承を防ぎます。保存後のUI・状態更新はMainActorへ戻ります。
+
 Mac HTTPサーバーのテストは次のコマンドで実行します。
 
 ```sh

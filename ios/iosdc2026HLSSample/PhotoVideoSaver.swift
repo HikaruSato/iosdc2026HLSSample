@@ -44,7 +44,8 @@ final class PhotoVideoSaver: PhotoVideoSaving {
               formats.first.map({ CMFormatDescriptionGetMediaSubType($0) }) == kCMVideoCodecType_HEVC else {
             throw LocalRecordingError(message: "保存動画が1080×1920・HEVCではありません")
         }
-        try await PHPhotoLibrary.shared().performChanges {
+        // Photosは独自のserial queueで実行する。MainActorを継承しないSendable blockを渡す。
+        try await PHPhotoLibrary.shared().performChanges { @Sendable [url] in
             PHAssetCreationRequest.forAsset().addResource(with: .video, fileURL: url, options: nil)
         }
         // 写真保存成功後は再試行対象から外し、削除失敗による重複保存を防ぐ。
