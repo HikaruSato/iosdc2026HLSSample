@@ -1,8 +1,21 @@
+
 # iosdc2026HLSSample
 
 iPhone端末内でHLSを生成し、HTTPでオブジェクトサーバーへアップロードしてライブ配信する流れを確認するためのサンプルです。
 
 本番構成のS3へのアップロードとCloudFrontからの配信を、Mac上の小さなHTTPサーバーで置き換えています。iOS側のHLS生成とアップロード順序を説明しやすくすることが目的です。
+
+# スクリーンショット
+
+## アプリ
+
+https://github.com/user-attachments/assets/6b40f4e5-ddc9-450e-84df-ee625065a6dd
+
+
+### ブラウザ
+
+https://github.com/user-attachments/assets/0125016f-4d88-43f4-a8e7-82e7754504c5
+
 
 ## 構成
 
