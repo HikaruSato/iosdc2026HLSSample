@@ -5,9 +5,9 @@ iPhone端末内でHLSを生成し、HTTPでオブジェクトサーバーへア�
 
 本番構成のS3へのアップロードとCloudFrontからの配信を、Mac上の小さなHTTPサーバーで置き換えています。iOS側のHLS生成とアップロード順序を説明しやすくすることが目的です。
 
-# スクリーンショット
+## スクリーンショット
 
-## アプリ
+### アプリ
 
 https://github.com/user-attachments/assets/6b40f4e5-ddc9-450e-84df-ee625065a6dd
 
@@ -33,11 +33,11 @@ iPhone
 - iOSはカメラとマイクの`CMSampleBuffer`を`AVAssetWriter`へ渡します。
 - `AVAssetWriter.inputReceiver(for:)`でVideo／Audio Inputを接続し、`SampleBufferReceiver`へsampleを書き込みます。
 - `AVAssetWriterDelegate`から`init.mp4`とfragmented MP4のsegmentを受け取ります。
-- media segmentの実際の長さを`AVAssetSegmentReport`から取得し、取得できない場合だけ2秒へフォールバックします。
+- media segmentの実際の長さを`AVAssetSegmentReport`のvideo trackから取得し、有効な値が得られない場合は設定したsegment間隔（既定2秒）へフォールバックします。
 - `init.mp4`を最初に1回アップロードします。
 - 各segmentをアップロードしてから、そのsegmentを追加した`playlist.m3u8`をアップロードします。
-- 停止時は`#EXT-X-ENDLIST`を追加したplaylistをアップロードします。
-- ブラウザは最新のstreamを自動選択し、SafariのネイティブHLSまたは同梱したhls.jsで再生します。
+- playlistは過去のsegmentを保持するEVENT形式です。正常停止時は、initと1つ以上のmedia segmentが公開済みの場合に`#EXT-X-ENDLIST`を追加したplaylistをアップロードします。
+- ブラウザは1秒ごとにstream一覧を取得し、playlistの更新時刻が最も新しいstream（終了済みも含む）を自動選択します。ネイティブHLSに対応するブラウザではその機能を使い、それ以外では同梱したhls.jsで再生します。初期状態はミュートです。
 
 ### iOS側の責務
 
@@ -52,19 +52,21 @@ SampleHLSStreamer
 - `LocalVideoWriter`は縦向き1080×1920・HEVC（H.265）Main・映像5 Mbps、AAC・96 kbps・44.1 kHz・モノラルでMP4を生成します。
 - HLSには時刻補正したコピー、MP4には撮影時刻のコピーを渡し、両Writerのdropと失敗を独立して扱います。
 - `HLSStreamPublisher`はfragmentを1つずつ受け取り、init、segment、playlist、ENDLISTの公開順とretryを管理します。
-- `HLSManifest`はplaylistの状態とrender、`HTTPHLSClient`はURLとHTTP PUTだけを担当します。
-- `SampleHLSStreamer`はRecorderとPublisherを接続し、停止時に最後のfragmentとENDLISTの公開完了まで待ちます。
+- `HLSManifest`はplaylistの状態とrender、`HTTPHLSClient`はURLの組み立て、接続確認（`GET /health`）、HTTP PUTとレスポンスの検証を担当します。
+- `SampleHLSStreamer`はRecorderとPublisherを接続し、停止時にWriterの終了、写真保存処理、Publisherの終了を待ちます。正常時は最後のfragmentとENDLISTの公開まで行います。
 - `PhotoVideoSaver`は完成したMP4を写真ライブラリへ保存します。MP4をサーバーへアップロードしません。
+
+各PUTは初回を含めて最大3回試行します。失敗が確定するとエラーを表示し、その配信では以降のHLS公開を行いません。HLS生成に失敗した場合もENDLISTは公開しません。エラーだけでは撮影・保存用MP4の生成は自動停止しないため、アプリの`停止`で終了処理と写真保存を行います。
 
 ## 配信終了時の端末保存
 
 配信開始にはカメラ・マイクに加えて、写真ライブラリへの追加権限が必要です。写真への追加を拒否した場合は配信を開始しません。設定アプリで許可してください。
 
-撮影は1080pで行い、配信用HLSは従来のH.264・720×1280・1.5 Mbps、保存動画は上記のフルHD・HEVCで生成します。必要な撮影・保存設定に対応しない端末では開始エラーになります。
+撮影は背面カメラで縦向き1080pで行い、配信用HLSはH.264 High・720×1280・映像1.5 Mbps、AAC・64 kbps・44.1 kHz・モノラル、保存動画は上記のフルHD・HEVCで生成します。必要な撮影・保存設定に対応しない場合は、プレビュー・配信開始時、または保存用Writerの処理時にエラーになります。
 
 停止すると両Writerの完了を待ち、写真へ自動保存します。写真保存はHTTP送信完了を待たずに始まり、画面ではHLSと写真保存それぞれの結果を確認できます。「保存しました」の表示後、写真アプリで映像・音声・向きを確認してください。
 
-写真保存に失敗した完成MP4はApplication Supportの`LocalRecordings`に保持し、「未保存の動画を写真へ保存」から再試行できます。アプリ再起動後も未保存動画を表示します。写真保存成功後は作業用ファイルを削除します。未完成の`.recording.mp4`は写真保存対象になりません。
+写真保存に失敗した完成MP4はApplication Supportの`LocalRecordings`に保持し、「未保存の動画を写真へ保存」から再試行できます。アプリ再起動後も未保存動画を表示します。写真保存成功後は作業用ファイルの削除を試み、削除に失敗しても再保存対象から外して重複保存を防ぎます。未完成の`.recording.mp4`は写真保存対象になりません。
 
 バックグラウンド移行時も停止処理を行い、iOSが許す有限の実行時間で終了処理を保護します。時間切れ時は警告を表示します。継続的なバックグラウンド撮影を保証するサンプルではありません。完成済みMP4が未保存の場合は、アプリに戻って再試行します。
 
@@ -115,12 +117,12 @@ Python 3.10以上を使います。追加パッケージのインストールは
 
 2. Macのブラウザで`http://localhost:8080`を開きます。
 3. MacとiPhoneを同じネットワークへ接続します。
-4. サーバー起動時に表示される`http://<MacのIPアドレス>:8080`をiOSアプリの`Mac HTTP Server`へ入力し、`接続確認`を押します。
-5. `ios/iosdc2026HLSSample.xcodeproj`をXcodeで開き、実機でアプリを実行します。
-6. カメラとマイクの権限を許可し、`配信開始`を押して写真への追加も許可します。
+4. `ios/iosdc2026HLSSample.xcodeproj`をXcodeで開き、アプリターゲットの`Signing & Capabilities`で自分のTeamを選択して、iPhone実機で実行します。起動時にカメラとマイクの権限を許可します。
+5. サーバー起動時に表示される`http://<MacのIPアドレス>:8080`をiOSアプリの`Mac HTTP Server`へ入力し、`接続確認`を押します。ローカルネットワークへのアクセスを求められた場合は許可します。
+6. `配信開始`を押して写真への追加も許可し、Macのブラウザで再生を確認します。音声を確認する場合はプレイヤーのミュートを解除します。
 7. 停止後に`保存しました`を確認し、写真アプリで保存された動画を再生します。
 
-macOSのファイアウォール確認が表示された場合は、Pythonからの受信接続を許可してください。iOS SimulatorからMac上のサーバーへ接続する場合は`http://localhost:8080`を使用できます。
+macOSのファイアウォール確認が表示された場合は、Pythonからの受信接続を許可してください。iOS SimulatorからMac上のサーバーへの接続確認には`http://localhost:8080`を使用できます。カメラ撮影を含む配信・保存の動作確認にはiPhone実機を使用します。
 
 ### 会場でngrok経由のアップロードを確認する
 
@@ -185,9 +187,11 @@ python3 server/server.py --port 8090 --data-dir /tmp/iosdc-hls
 | `PUT` | `/streams/{streamId}/seg/{sequence}.m4s` | media segmentの保存 |
 | `PUT` | `/streams/{streamId}/playlist.m3u8` | playlistの作成・置換 |
 | `GET` | `/api/streams` | viewer用のstream一覧 |
-| `GET` | `/streams/{streamId}/...` | HLSオブジェクトの配信 |
+| `GET` | `/streams/{streamId}/init.mp4`、`/streams/{streamId}/seg/{sequence}.m4s`、`/streams/{streamId}/playlist.m3u8` | HLSオブジェクトの配信 |
 
 サーバーはPUTを一時ファイルへ書き込み、完了後に置換します。ブラウザが書き込み途中のplaylistやsegmentを取得しないためです。
+
+`streamId`は英数字・`_`・`-`の1〜128文字、`sequence`は6桁の数字です。PUTには`Content-Length`が必要で、空の本文や32 MiBを超える本文は拒否します。GETの各パスはHEADにも対応し、ファイル配信は単一のbyte rangeに対応します。
 
 ## ビルドとテスト
 
@@ -231,4 +235,4 @@ python3 -m unittest discover -s server/tests -v
 
 Mac HTTPサーバーはデモ専用です。認証、TLS、アクセス制御、保存容量の管理は実装していません。通常は同一ネットワーク内だけで使用し、ngrokを使う場合も上記の会場デモ中だけ一時的に公開してください。
 
-ブラウザ再生には同梱したhls.js v1.6.16を使用します。ライセンスは`server/static/vendor/LICENSE.hls.js.txt`を参照してください。
+ネイティブHLSに対応しないブラウザでは同梱したhls.js v1.6.16を使用します。ライセンスは`server/static/vendor/LICENSE.hls.js.txt`を参照してください。
